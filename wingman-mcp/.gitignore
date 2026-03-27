@@ -1,0 +1,8 @@
+stores/
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.env
+*_checkpoint.json

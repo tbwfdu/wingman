@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# macOS
+.DS_Store
+
+# Wingman MCP - pre-built RAG stores (too large for git)
+wingman-mcp/stores/
+
+# Config files with credentials
+config.json
