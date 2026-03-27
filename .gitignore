@@ -209,6 +209,9 @@ __marimo__/
 # macOS
 .DS_Store
 
+# Claude Code
+CLAUDE.md
+
 # Wingman MCP - pre-built RAG stores (too large for git)
 wingman-mcp/stores/
 
