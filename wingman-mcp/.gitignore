@@ -6,3 +6,4 @@ dist/
 build/
 .env
 *_checkpoint.json
+CLAUDE.md
