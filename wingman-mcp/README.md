@@ -291,7 +291,7 @@ export WINGMAN_MCP_API_URL="https://as1831.awmdm.com"
 
 ## Troubleshooting
 
-- **"RAG stores not found"** — Run `wingman-mcp ingest` first, then `wingman-mcp status` to verify.
+- **"RAG stores not found"** — Copy the stores folder. See Setup Step 2.
 - **"UEM API credentials are not configured"** — Run `wingman-mcp auth set` to provide your OAuth credentials.
 - **"HTTP 401" from auth test** — Double-check your Client ID, Client Secret, and Token URL.
 - **Server not detected** — Make sure `wingman-mcp` is on your PATH. Run `which wingman-mcp` to confirm.
