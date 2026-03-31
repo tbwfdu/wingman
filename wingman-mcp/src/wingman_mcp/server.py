@@ -391,6 +391,51 @@ TOOLS = [
             "required": [],
         },
     ),
+    Tool(
+        name="uem_create_script",
+        description=(
+            "Create a script in Workspace ONE UEM for an organization group. "
+            "Scripts run on managed devices for detection or remediation. "
+            "Provide script content as plain text — it is base64-encoded automatically. "
+            "Requires UEM API auth to be configured."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "og_uuid": {"type": "string", "description": "Organization group UUID (e.g. 94e8fd6d-cb42-4692-bde0-3cbb9249ee6a)"},
+                "name": {"type": "string", "description": "Script name"},
+                "description": {"type": "string", "description": "Script description"},
+                "platform": {"type": "string", "description": "Target platform: macOS, Windows, Linux"},
+                "script_type": {"type": "string", "description": "Script language: BASH, POWERSHELL, ZSHELL, PYTHON"},
+                "script_content": {"type": "string", "description": "Script source code as plain text"},
+                "execution_context": {"type": "string", "description": "Run as System or User (default: System)"},
+                "timeout": {"type": "integer", "description": "Execution timeout in seconds (default: 120)"},
+            },
+            "required": ["og_uuid", "name", "platform", "script_type", "script_content"],
+        },
+    ),
+    Tool(
+        name="uem_create_sensor",
+        description=(
+            "Create a sensor in Workspace ONE UEM for an organization group. "
+            "Sensors run scripts on devices and return a typed value (string, integer, boolean). "
+            "Provide script content as plain text — it is base64-encoded automatically. "
+            "Requires UEM API auth to be configured."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "og_uuid": {"type": "string", "description": "Organization group UUID"},
+                "name": {"type": "string", "description": "Sensor name"},
+                "description": {"type": "string", "description": "Sensor description"},
+                "platform": {"type": "string", "description": "Target platform: macOS, Windows, Linux"},
+                "script_content": {"type": "string", "description": "Sensor script source code as plain text"},
+                "response_type": {"type": "string", "description": "Return value type: STRING, INTEGER, BOOLEAN, DATETIME (default: STRING)"},
+                "execution_context": {"type": "string", "description": "Run as System or User (default: System)"},
+            },
+            "required": ["og_uuid", "name", "platform", "script_content"],
+        },
+    ),
 ]
 
 
@@ -435,6 +480,8 @@ def _register_api_tools():
         "uem_search_smart_groups": (uem_api.search_smart_groups, None),
         "uem_search_profiles": (uem_api.search_profiles, None),
         "uem_search_apps": (uem_api.search_apps, None),
+        "uem_create_script": (uem_api.create_script, ["og_uuid"]),
+        "uem_create_sensor": (uem_api.create_sensor, ["og_uuid"]),
     })
 
 
