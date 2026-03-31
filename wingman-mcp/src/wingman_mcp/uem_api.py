@@ -3,6 +3,7 @@
 Each function takes a UEMAuth instance and query parameters,
 makes an authenticated API call, and returns the parsed response.
 """
+import base64
 from typing import Any, Optional
 
 import httpx
@@ -164,3 +165,58 @@ def search_apps(auth: UEMAuth, **kwargs) -> dict:
     locationgroupid, orderby, page, pagesize."""
     params = {k: v for k, v in kwargs.items() if v is not None}
     return _get(auth, "/api/mam/apps/search", params=params, accept=ACCEPT_V1)
+
+
+# ---------------------------------------------------------------------------
+# Script operations
+# ---------------------------------------------------------------------------
+
+def create_script(
+    auth: UEMAuth,
+    og_uuid: str,
+    name: str,
+    platform: str,
+    script_type: str,
+    script_content: str,
+    description: str = "",
+    execution_context: str = "System",
+    timeout: int = 120,
+) -> dict:
+    """Create a script for an organization group (base64-encodes script_content)."""
+    body = {
+        "name": name,
+        "description": description,
+        "platform": platform,
+        "scriptType": script_type,
+        "executionContext": execution_context,
+        "timeout": timeout,
+        "scriptData": base64.b64encode(script_content.encode()).decode(),
+    }
+    return _post(auth, f"/api/mdm/groups/{og_uuid}/scripts", body=body, accept=ACCEPT_V1)
+
+
+# ---------------------------------------------------------------------------
+# Sensor operations
+# ---------------------------------------------------------------------------
+
+def create_sensor(
+    auth: UEMAuth,
+    og_uuid: str,
+    name: str,
+    platform: str,
+    script_content: str,
+    description: str = "",
+    response_type: str = "STRING",
+    execution_context: str = "System",
+) -> dict:
+    """Create a sensor for an organization group (base64-encodes script_content)."""
+    body = {
+        "name": name,
+        "description": description,
+        "platform": platform,
+        "queryType": "SCRIPT",
+        "queryResponse": base64.b64encode(script_content.encode()).decode(),
+        "queryResponseType": response_type,
+        "executionContext": execution_context,
+    }
+    return _post(auth, f"/api/mdm/groups/{og_uuid}/sensors", body=body, accept=ACCEPT_V1)
