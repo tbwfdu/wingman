@@ -15,6 +15,20 @@ ACCEPT_V2 = "application/json;version=2"
 ACCEPT_V3 = "application/json;version=3"
 TIMEOUT = 20.0
 
+# Map friendly platform names to API enum values
+_PLATFORM_MAP = {
+    "macos": "APPLE_OSX",
+    "apple_osx": "APPLE_OSX",
+    "windows": "WIN_RT",
+    "win_rt": "WIN_RT",
+    "linux": "LINUX",
+}
+
+
+def _normalize_platform(platform: str) -> str:
+    """Convert a user-friendly platform name to the API enum value."""
+    return _PLATFORM_MAP.get(platform.lower(), platform)
+
 
 def _headers(auth: UEMAuth, accept: str = ACCEPT_V2) -> dict:
     return {
@@ -38,7 +52,13 @@ def _post(auth: UEMAuth, path: str, body: Optional[dict] = None,
     """Perform an authenticated POST request against the UEM API."""
     url = f"{auth.api_base_url}{path}"
     resp = httpx.post(url, headers=_headers(auth, accept), json=body, timeout=TIMEOUT)
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        detail = resp.text[:500] if resp.text else ""
+        raise httpx.HTTPStatusError(
+            f"{resp.status_code} {resp.reason_phrase}: {detail}",
+            request=resp.request,
+            response=resp,
+        )
     if resp.status_code == 204 or not resp.content:
         return {"status": "success", "http_status": resp.status_code}
     return resp.json()
@@ -179,18 +199,19 @@ def create_script(
     script_type: str,
     script_content: str,
     description: str = "",
-    execution_context: str = "System",
+    execution_context: str = "SYSTEM",
     timeout: int = 120,
 ) -> dict:
     """Create a script for an organization group (base64-encodes script_content)."""
     body = {
         "name": name,
         "description": description,
-        "platform": platform,
-        "scriptType": script_type,
-        "executionContext": execution_context,
+        "platform": _normalize_platform(platform),
+        "script_type": script_type.upper(),
+        "execution_context": execution_context.upper(),
         "timeout": timeout,
-        "scriptData": base64.b64encode(script_content.encode()).decode(),
+        "script_data": base64.b64encode(script_content.encode()).decode(),
+        "allowed_in_catalog": False,
     }
     return _post(auth, f"/api/mdm/groups/{og_uuid}/scripts", body=body, accept=ACCEPT_V1)
 
@@ -204,19 +225,24 @@ def create_sensor(
     og_uuid: str,
     name: str,
     platform: str,
+    query_type: str,
     script_content: str,
     description: str = "",
     response_type: str = "STRING",
-    execution_context: str = "System",
+    execution_context: str = "SYSTEM",
 ) -> dict:
-    """Create a sensor for an organization group (base64-encodes script_content)."""
+    """Create a sensor for an organization group (base64-encodes script_content).
+
+    Uses the V2 sensor endpoint which supports POWERSHELL, PYTHON, BASH, and ZSH.
+    """
     body = {
         "name": name,
         "description": description,
-        "platform": platform,
-        "queryType": "SCRIPT",
-        "queryResponse": base64.b64encode(script_content.encode()).decode(),
-        "queryResponseType": response_type,
-        "executionContext": execution_context,
+        "organization_group_uuid": og_uuid,
+        "platform": _normalize_platform(platform),
+        "query_type": query_type.upper(),
+        "query_response_type": response_type.upper(),
+        "execution_context": execution_context.upper(),
+        "script_data": base64.b64encode(script_content.encode()).decode(),
     }
-    return _post(auth, f"/api/mdm/groups/{og_uuid}/sensors", body=body, accept=ACCEPT_V1)
+    return _post(auth, f"/api/mdm/devicesensors", body=body, accept=ACCEPT_V2)
