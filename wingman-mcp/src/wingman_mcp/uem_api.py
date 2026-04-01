@@ -172,7 +172,131 @@ def search_profiles(auth: UEMAuth, **kwargs) -> dict:
     """Search device profiles. Supports: searchtext, type, platform,
     status, organizationgroupid, orderby, page, pagesize."""
     params = {k: v for k, v in kwargs.items() if v is not None}
-    return _get(auth, "/api/mdm/profiles/search", params=params, accept=ACCEPT_V1)
+    return _get(auth, "/api/mdm/profiles/search", params=params, accept=ACCEPT_V2)
+
+
+_PROFILE_PLATFORM_PATHS = {
+    "winrt": "winrt",
+    "apple": "apple",
+    "appleosx": "apple",
+    "android": "android",
+}
+
+
+def create_profile(auth: UEMAuth, platform: str, profile_json: str) -> dict:
+    """Create a device profile from a V2 JSON body.
+
+    Accepts the same General + payload schema returned by get_profile when
+    V2 is supported.  Works for:
+      - WinRT  — all payload types
+      - Apple  — V2-supported payloads (Custom Settings, WiFi, VPN, SCEP,
+                 Credentials, SSO Extension, Email, WebClips).
+                 Profiles with non-V2 payloads (Dock, Disk Encryption, etc.)
+                 cannot be created via this endpoint.
+      - Android — standard V2 payloads
+
+    Platform: WinRT, Apple, AppleOsX, or Android.
+    """
+    key = platform.lower()
+    path_segment = _PROFILE_PLATFORM_PATHS.get(key)
+    if not path_segment:
+        raise ValueError(
+            f"Unsupported platform '{platform}'. "
+            f"Use one of: WinRT, Apple, AppleOsX, Android"
+        )
+    import json as _json
+    body = _json.loads(profile_json) if isinstance(profile_json, str) else profile_json
+    return _post(auth, f"/api/mdm/profiles/platforms/{path_segment}/create",
+                 body=body, accept=ACCEPT_V2)
+
+
+def get_profile(auth: UEMAuth, profile_id: str) -> dict:
+    """Get full device profile details by profile ID.
+
+    V2 is tried first and returns a General + payload-sections structure
+    that can be round-tripped with create_profile.  V2 works for all
+    Windows profiles and macOS/Android profiles whose payloads are in the
+    V2 schema (Custom Settings, WiFi, VPN, SCEP, etc.).
+
+    When V2 fails (non-V2 payloads like Dock or Disk Encryption), falls
+    back to the metadata-transforms endpoint which returns full payload
+    field values and profile metadata.  This data is read-only — there is
+    no corresponding create/POST endpoint for it.
+    """
+    try:
+        return _get(auth, f"/api/mdm/profiles/{profile_id}", accept=ACCEPT_V2)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code != 400:
+            raise
+    # V2 unsupported for this profile — resolve UUIDs via search
+    search = _get(auth, "/api/mdm/profiles/search",
+                  params={"searchtext": "", "pagesize": 500}, accept=ACCEPT_V2)
+    profile_uuid = None
+    og_uuid = None
+    for p in search.get("ProfileList", []):
+        if str(p.get("ProfileId")) == str(profile_id):
+            profile_uuid = p.get("ProfileUuid")
+            og_uuid = p.get("OrganizationGroupUuid")
+            break
+    if not profile_uuid or not og_uuid:
+        raise ValueError(f"Profile {profile_id} not found in search results")
+    return _get(
+        auth,
+        f"/api/mdm/profiles/metadata-transforms/{og_uuid}/{profile_uuid}",
+        params={
+            "culture": "en-US",
+            "context": "User",
+            "management_type": "IMPERATIVE",
+            "resource_type": "PROFILES",
+        },
+        accept=ACCEPT_V1,
+    )
+
+
+# ---------------------------------------------------------------------------
+# App operations
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Compliance Policy operations
+# ---------------------------------------------------------------------------
+
+def search_compliance_policies(auth: UEMAuth, **kwargs) -> dict:
+    """Search compliance policies. Supports: organizationgroupid, page, pagesize."""
+    params = {k: v for k, v in kwargs.items() if v is not None}
+    url = f"{auth.api_base_url}/api/mdm/compliancepolicies"
+    resp = httpx.get(url, headers=_headers(auth, ACCEPT_V1), params=params, timeout=TIMEOUT)
+    resp.raise_for_status()
+    if resp.status_code == 204 or not resp.content:
+        return {"CompliancePolicies": [], "Total": 0}
+    return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Security Baseline operations
+# ---------------------------------------------------------------------------
+
+def get_baseline_templates(auth: UEMAuth) -> list:
+    """List vendor baseline templates (MSFT, CIS) with available OS versions."""
+    return _get(auth, "/api/mdm/baselines/templates", accept=ACCEPT_V1)
+
+
+def search_baseline_policies(auth: UEMAuth, os_version_uuid: str, **kwargs) -> dict:
+    """List GPO policies in a baseline catalog version.
+
+    Use get_baseline_templates first to find the OS version UUID.
+    Supports: page, pagesize. The API does not support server-side name
+    filtering — all policies are returned and must be filtered client-side.
+    """
+    params = {k: v for k, v in kwargs.items() if v is not None}
+    return _get(auth, f"/api/mdm/baselines/catalogs/{os_version_uuid}/policies",
+                params=params, accept=ACCEPT_V1)
+
+
+def get_baseline_policy(auth: UEMAuth, policy_uuid: str) -> dict:
+    """Get full details of a baseline policy including explanation and status."""
+    return _get(auth, f"/api/mdm/baselines/catalogs/policies/{policy_uuid}",
+                accept=ACCEPT_V1)
 
 
 # ---------------------------------------------------------------------------
@@ -187,9 +311,77 @@ def search_apps(auth: UEMAuth, **kwargs) -> dict:
     return _get(auth, "/api/mam/apps/search", params=params, accept=ACCEPT_V1)
 
 
+def get_app(auth: UEMAuth, app_id: str, app_type: str = "internal") -> dict:
+    """Get full details of an application by its numeric ID.
+
+    app_type: internal, public, or purchased.
+    Enriches the response with ApplicationFileName from the search endpoint
+    (the detail endpoint omits it).
+    """
+    detail = _get(auth, f"/api/mam/apps/{app_type}/{app_id}", accept=ACCEPT_V1)
+    if not detail.get("ApplicationFileName"):
+        search = _get(auth, "/api/mam/apps/search",
+                      params={"applicationname": detail.get("ApplicationName", ""),
+                              "pagesize": 500},
+                      accept=ACCEPT_V1)
+        for app in search.get("Application", []):
+            if str(app.get("Id", {}).get("Value")) == str(app_id):
+                detail["ApplicationFileName"] = app.get("ApplicationFileName")
+                break
+    return detail
+
+
+def download_app_blob(auth: UEMAuth, blob_uuid: str, output_dir: str,
+                      filename: str = "") -> dict:
+    """Download an app binary blob to disk.
+
+    Returns the file path and size. Use get_app first to find the
+    ApplicationFileBlobGUID.
+    """
+    import os
+    url = f"{auth.api_base_url}/api/mam/blobs/downloadblob/{blob_uuid}"
+    headers = {
+        "Authorization": f"Bearer {auth.get_token()}",
+        "Accept": "application/json;version=2",
+    }
+    with httpx.stream("GET", url, headers=headers, timeout=120.0) as resp:
+        resp.raise_for_status()
+        # Determine filename — caller should provide one from get_app
+        if not filename:
+            filename = f"{blob_uuid}.bin"
+        os.makedirs(output_dir, exist_ok=True)
+        path = os.path.join(output_dir, filename)
+        size = 0
+        with open(path, "wb") as f:
+            for chunk in resp.iter_bytes(chunk_size=8192):
+                f.write(chunk)
+                size += len(chunk)
+    return {"path": path, "size_bytes": size, "blob_uuid": blob_uuid}
+
+
 # ---------------------------------------------------------------------------
 # Script operations
 # ---------------------------------------------------------------------------
+
+def search_scripts(auth: UEMAuth, og_uuid: str) -> dict:
+    """List all scripts for an organization group."""
+    return _get(auth, f"/api/mdm/groups/{og_uuid}/scripts", accept=ACCEPT_V1)
+
+
+def get_script(auth: UEMAuth, script_uuid: str) -> dict:
+    """Get a script by UUID including base64-encoded script_data."""
+    return _get(auth, f"/api/mdm/scripts/{script_uuid}", accept=ACCEPT_V1)
+
+
+def search_sensors(auth: UEMAuth, og_uuid: str) -> dict:
+    """List all sensors for an organization group."""
+    return _get(auth, f"/api/mdm/devicesensors/list/{og_uuid}", accept=ACCEPT_V2)
+
+
+def get_sensor(auth: UEMAuth, sensor_uuid: str) -> dict:
+    """Get a sensor by UUID including base64-encoded script_data."""
+    return _get(auth, f"/api/mdm/devicesensors/{sensor_uuid}", accept=ACCEPT_V2)
+
 
 def create_script(
     auth: UEMAuth,
@@ -214,6 +406,25 @@ def create_script(
         "allowed_in_catalog": False,
     }
     return _post(auth, f"/api/mdm/groups/{og_uuid}/scripts", body=body, accept=ACCEPT_V1)
+
+
+_SCRIPT_READONLY_KEYS = {"script_uuid", "version", "assignment_count",
+                         "created_or_modified_by", "created_or_modified_on"}
+
+
+def create_script_from_json(auth: UEMAuth, script_json: str) -> dict:
+    """Create a script from a JSON body (same schema returned by get_script).
+
+    Strips read-only fields and posts to the create endpoint.
+    The organization_group_uuid in the body determines the target OG.
+    """
+    import json as _json
+    body = _json.loads(script_json) if isinstance(script_json, str) else script_json
+    og_uuid = body.get("organization_group_uuid")
+    if not og_uuid:
+        raise ValueError("organization_group_uuid is required in the script JSON")
+    cleaned = {k: v for k, v in body.items() if k not in _SCRIPT_READONLY_KEYS}
+    return _post(auth, f"/api/mdm/groups/{og_uuid}/scripts", body=cleaned, accept=ACCEPT_V1)
 
 
 # ---------------------------------------------------------------------------
@@ -245,4 +456,22 @@ def create_sensor(
         "execution_context": execution_context.upper(),
         "script_data": base64.b64encode(script_content.encode()).decode(),
     }
-    return _post(auth, f"/api/mdm/devicesensors", body=body, accept=ACCEPT_V2)
+    return _post(auth, "/api/mdm/devicesensors", body=body, accept=ACCEPT_V2)
+
+
+_SENSOR_READONLY_KEYS = {"uuid", "is_read_only", "last_modified_by",
+                         "last_modified_on", "assignment_count"}
+
+
+def create_sensor_from_json(auth: UEMAuth, sensor_json: str) -> dict:
+    """Create a sensor from a JSON body (same schema returned by get_sensor).
+
+    Strips read-only fields and posts to the create endpoint.
+    The organization_group_uuid in the body determines the target OG.
+    """
+    import json as _json
+    body = _json.loads(sensor_json) if isinstance(sensor_json, str) else sensor_json
+    if not body.get("organization_group_uuid"):
+        raise ValueError("organization_group_uuid is required in the sensor JSON")
+    cleaned = {k: v for k, v in body.items() if k not in _SENSOR_READONLY_KEYS}
+    return _post(auth, "/api/mdm/devicesensors", body=cleaned, accept=ACCEPT_V2)

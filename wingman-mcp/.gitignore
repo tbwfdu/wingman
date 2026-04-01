@@ -7,3 +7,5 @@ build/
 .env
 *_checkpoint.json
 CLAUDE.md
+downloads/
+profiles/

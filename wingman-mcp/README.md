@@ -4,7 +4,7 @@
 
 MCP server providing Workspace ONE UEM documentation search via local RAG and live API access to your UEM environment.
 
-Exposes 18 tools over the [Model Context Protocol](https://modelcontextprotocol.io):
+Exposes 33 tools over the [Model Context Protocol](https://modelcontextprotocol.io):
 
 ### Documentation search (local RAG — no auth required)
 
@@ -16,6 +16,8 @@ Exposes 18 tools over the [Model Context Protocol](https://modelcontextprotocol.
 
 ### Live UEM API (requires auth — see [UEM API Authentication](#uem-api-authentication) below)
 
+#### Devices
+
 | Tool | Description |
 |------|-------------|
 | `uem_search_devices` | Search/filter managed devices by user, platform, model, compliance, ownership |
@@ -25,20 +27,66 @@ Exposes 18 tools over the [Model Context Protocol](https://modelcontextprotocol.
 | `uem_get_device_security` | Device security info (encryption, passcode, compromised status) |
 | `uem_get_device_network` | Device network info (IPs, MAC, WiFi, cellular) |
 | `uem_send_device_command` | Send commands to a device (DeviceQuery, Lock, EnterpriseWipe, etc.) |
+
+#### Users & Organization Groups
+
+| Tool | Description |
+|------|-------------|
 | `uem_search_users` | Search enrollment users by name, email, username |
 | `uem_get_user` | Get enrollment user details by user ID |
 | `uem_search_organization_groups` | Search organization groups (OGs) |
 | `uem_get_organization_group` | Get OG details by ID |
 | `uem_get_og_children` | List child OGs under a parent |
 | `uem_search_smart_groups` | Search smart groups |
+
+#### Profiles
+
+| Tool | Description |
+|------|-------------|
 | `uem_search_profiles` | Search device profiles by name, platform, status |
+| `uem_get_profile` | Get full profile details by ID (V2 round-trip or metadata-transforms fallback) |
+| `uem_create_profile` | Create a profile from V2 JSON (Windows all payloads; Apple/Android V2 payloads) |
+
+#### Scripts
+
+| Tool | Description |
+|------|-------------|
+| `uem_search_scripts` | List all scripts for an organization group |
+| `uem_get_script` | Get full script details by UUID (including base64 script data) |
+| `uem_create_script` | Create a script from individual parameters (name, platform, script content) |
+| `uem_create_script_from_json` | Create a script from JSON (round-trip from `uem_get_script`) |
+
+#### Sensors
+
+| Tool | Description |
+|------|-------------|
+| `uem_search_sensors` | List all sensors for an organization group |
+| `uem_get_sensor` | Get full sensor details by UUID (including base64 script data) |
+| `uem_create_sensor` | Create a sensor from individual parameters (name, platform, script content) |
+| `uem_create_sensor_from_json` | Create a sensor from JSON (round-trip from `uem_get_sensor`) |
+
+#### Applications
+
+| Tool | Description |
+|------|-------------|
 | `uem_search_apps` | Search applications by name, bundle ID, platform |
+| `uem_get_app` | Get full app details by ID (includes blob GUID and original filename) |
+| `uem_download_app_blob` | Download an application binary to disk |
+
+#### Compliance & Security Baselines
+
+| Tool | Description |
+|------|-------------|
+| `uem_search_compliance_policies` | Search compliance policies by organization group |
+| `uem_get_baseline_templates` | List security baseline vendor templates (Microsoft, CIS) and OS versions |
+| `uem_search_baseline_policies` | Browse GPO policies in a baseline catalog version |
+| `uem_get_baseline_policy` | Get full details of a baseline policy by UUID |
 
 ## What's included
 
 ```
 wingman-mcp/
-├── wingman_mcp-0.2.0-py3-none-any.whl   # Python package
+├── wingman_mcp-0.3.2-py3-none-any.whl   # Python package
 ├── stores/                                # Pre-built RAG databases
 │   ├── uem/                               #   UEM product documentation
 │   ├── api/                               #   REST API reference
@@ -55,7 +103,7 @@ wingman-mcp/
 ### 1. Install the package
 
 ```bash
-pip install wingman_mcp-0.2.0-py3-none-any.whl
+pip install wingman_mcp-0.3.2-py3-none-any.whl
 ```
 
 ### 2. Place the stores
