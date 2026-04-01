@@ -369,6 +369,90 @@ TOOLS = [
         },
     ),
     Tool(
+        name="uem_get_profile",
+        description=(
+            "Get full details of a specific device profile by its numeric profile ID. "
+            "For Windows and profiles with V2-supported payloads (Custom Settings, WiFi, "
+            "VPN, SSO Extension, etc.), returns a General + payload structure that can be "
+            "round-tripped with uem_create_profile. For profiles with non-V2 payloads "
+            "(Dock, Disk Encryption, etc.), returns full payload field values and metadata "
+            "via the metadata-transforms endpoint (read-only, cannot be re-uploaded). "
+            "Use uem_search_profiles first to find profile IDs."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string", "description": "The numeric profile ID"},
+            },
+            "required": ["profile_id"],
+        },
+    ),
+    Tool(
+        name="uem_search_compliance_policies",
+        description=(
+            "Search for compliance policies in UEM. "
+            "Returns policy names, platforms, rules, and actions. "
+            "Supports: organizationgroupid, page, pagesize."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "organizationgroupid": {"type": "integer", "description": "Filter by organization group ID"},
+                "page": {"type": "integer", "description": "Page number (default: 0)"},
+                "pagesize": {"type": "integer", "description": "Results per page (default: 50)"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="uem_get_baseline_templates",
+        description=(
+            "List available security baseline vendor templates (Microsoft, CIS) "
+            "with their OS version catalogs. Use the OS version UUID from results "
+            "with uem_search_baseline_policies to browse the policy catalog."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    ),
+    Tool(
+        name="uem_search_baseline_policies",
+        description=(
+            "List GPO policies in a security baseline catalog version. "
+            "Returns policy names, paths, and configuration class. "
+            "Use uem_get_baseline_templates first to find the OS version UUID. "
+            "The API does not support server-side name filtering. "
+            "Supports: page, pagesize."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "os_version_uuid": {"type": "string", "description": "OS version UUID from uem_get_baseline_templates"},
+                "page": {"type": "integer", "description": "Page number (default: 0)"},
+                "pagesize": {"type": "integer", "description": "Results per page (default: 50)"},
+            },
+            "required": ["os_version_uuid"],
+        },
+    ),
+    Tool(
+        name="uem_get_baseline_policy",
+        description=(
+            "Get full details of a security baseline policy by its UUID. "
+            "Returns the policy name, path, class, full explanation of what "
+            "the policy does, and current configuration status. "
+            "Use uem_search_baseline_policies first to find policy UUIDs."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "policy_uuid": {"type": "string", "description": "The policy UUID"},
+            },
+            "required": ["policy_uuid"],
+        },
+    ),
+    Tool(
         name="uem_search_apps",
         description=(
             "Search for applications in UEM. "
@@ -389,6 +473,124 @@ TOOLS = [
                 "pagesize": {"type": "integer", "description": "Results per page (default: 50)"},
             },
             "required": [],
+        },
+    ),
+    Tool(
+        name="uem_get_app",
+        description=(
+            "Get full details of an application by its numeric ID. "
+            "Returns app configuration, version, platform, assignments, "
+            "deployment settings, and the ApplicationFileBlobGUID needed "
+            "to download the binary with uem_download_app_blob. "
+            "Use uem_search_apps first to find app IDs."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "app_id": {"type": "string", "description": "The numeric application ID"},
+                "app_type": {"type": "string", "description": "App type: internal, public, or purchased (default: internal)"},
+            },
+            "required": ["app_id"],
+        },
+    ),
+    Tool(
+        name="uem_download_app_blob",
+        description=(
+            "Download an application binary file from UEM to disk. "
+            "Use uem_get_app first to find the ApplicationFileBlobGUID. "
+            "Saves the file to the specified output directory and returns "
+            "the file path and size. Files can be large (hundreds of MB)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "blob_uuid": {"type": "string", "description": "The ApplicationFileBlobGUID from uem_get_app"},
+                "output_dir": {"type": "string", "description": "Directory to save the downloaded file"},
+                "filename": {"type": "string", "description": "Optional filename (defaults to blob UUID)"},
+            },
+            "required": ["blob_uuid", "output_dir"],
+        },
+    ),
+    Tool(
+        name="uem_create_profile",
+        description=(
+            "Create a device profile in Workspace ONE UEM from a V2 JSON body. "
+            "Accepts the same General + payload JSON returned by uem_get_profile "
+            "when V2 is supported. Use uem_get_profile to download, modify the name "
+            "or settings, then upload to create a copy. The API assigns a new profile "
+            "ID and UUID automatically. "
+            "Supports: WinRT (all payloads), Apple and Android (V2 payloads only — "
+            "Custom Settings, WiFi, VPN, SCEP, Credentials, SSO Extension, Email, "
+            "WebClips). macOS profiles with non-V2 payloads like Dock or Disk "
+            "Encryption cannot be created via this tool."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "platform": {"type": "string", "description": "Target platform: WinRT, Apple, AppleOsX, or Android"},
+                "profile_json": {"type": "string", "description": "Full profile V2 JSON body (General + payload sections, same schema as uem_get_profile V2 output)"},
+            },
+            "required": ["platform", "profile_json"],
+        },
+    ),
+    Tool(
+        name="uem_search_scripts",
+        description=(
+            "List all scripts for an organization group. "
+            "Returns script names, UUIDs, platforms, script types, and assignment counts. "
+            "Use the script UUID from results with uem_get_script to get full details."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "og_uuid": {"type": "string", "description": "Organization group UUID"},
+            },
+            "required": ["og_uuid"],
+        },
+    ),
+    Tool(
+        name="uem_get_script",
+        description=(
+            "Get full details of a script by its UUID, including base64-encoded script_data. "
+            "The response can be round-tripped with uem_create_script_from_json to create a copy. "
+            "Use uem_search_scripts first to find script UUIDs."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "script_uuid": {"type": "string", "description": "The script UUID"},
+            },
+            "required": ["script_uuid"],
+        },
+    ),
+    Tool(
+        name="uem_search_sensors",
+        description=(
+            "List all sensors for an organization group. "
+            "Returns sensor names, UUIDs, platforms, query types, response types, and assignment counts. "
+            "Use the sensor UUID from results with uem_get_sensor to get full details."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "og_uuid": {"type": "string", "description": "Organization group UUID"},
+            },
+            "required": ["og_uuid"],
+        },
+    ),
+    Tool(
+        name="uem_get_sensor",
+        description=(
+            "Get full details of a sensor by its UUID, including base64-encoded script_data. "
+            "The response can be round-tripped with uem_create_sensor_from_json to create a copy. "
+            "Use uem_search_sensors first to find sensor UUIDs."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "sensor_uuid": {"type": "string", "description": "The sensor UUID"},
+            },
+            "required": ["sensor_uuid"],
         },
     ),
     Tool(
@@ -415,6 +617,24 @@ TOOLS = [
         },
     ),
     Tool(
+        name="uem_create_script_from_json",
+        description=(
+            "Create a script from a JSON body (same schema returned by uem_get_script). "
+            "Use this to duplicate or migrate scripts: download with uem_get_script, "
+            "modify the name or settings, then upload with this tool. "
+            "The script_data should remain base64-encoded as returned by uem_get_script. "
+            "Read-only fields (script_uuid, version, assignment_count) are stripped automatically. "
+            "Script names only allow letters, numbers, periods, underscores, and spaces."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "script_json": {"type": "string", "description": "Full script JSON body (same schema as uem_get_script output)"},
+            },
+            "required": ["script_json"],
+        },
+    ),
+    Tool(
         name="uem_create_sensor",
         description=(
             "Create a sensor in Workspace ONE UEM for an organization group. "
@@ -435,6 +655,24 @@ TOOLS = [
                 "execution_context": {"type": "string", "description": "Run as SYSTEM or USER (default: SYSTEM)"},
             },
             "required": ["og_uuid", "name", "platform", "query_type", "script_content"],
+        },
+    ),
+    Tool(
+        name="uem_create_sensor_from_json",
+        description=(
+            "Create a sensor from a JSON body (same schema returned by uem_get_sensor). "
+            "Use this to duplicate or migrate sensors: download with uem_get_sensor, "
+            "modify the name or settings, then upload with this tool. "
+            "The script_data should remain base64-encoded as returned by uem_get_sensor. "
+            "Read-only fields (uuid, is_read_only) are stripped automatically. "
+            "Sensor names only allow letters, numbers, periods, underscores, and spaces."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "sensor_json": {"type": "string", "description": "Full sensor JSON body (same schema as uem_get_sensor output)"},
+            },
+            "required": ["sensor_json"],
         },
     ),
 ]
@@ -480,9 +718,23 @@ def _register_api_tools():
         "uem_get_og_children": (uem_api.get_og_children, ["og_id"]),
         "uem_search_smart_groups": (uem_api.search_smart_groups, None),
         "uem_search_profiles": (uem_api.search_profiles, None),
+        "uem_get_profile": (uem_api.get_profile, ["profile_id"]),
+        "uem_search_compliance_policies": (uem_api.search_compliance_policies, None),
+        "uem_get_baseline_templates": (uem_api.get_baseline_templates, None),
+        "uem_search_baseline_policies": (uem_api.search_baseline_policies, ["os_version_uuid"]),
+        "uem_get_baseline_policy": (uem_api.get_baseline_policy, ["policy_uuid"]),
         "uem_search_apps": (uem_api.search_apps, None),
+        "uem_get_app": (uem_api.get_app, ["app_id"]),
+        "uem_download_app_blob": (uem_api.download_app_blob, ["blob_uuid", "output_dir"]),
+        "uem_create_profile": (uem_api.create_profile, ["platform", "profile_json"]),
+        "uem_search_scripts": (uem_api.search_scripts, ["og_uuid"]),
+        "uem_get_script": (uem_api.get_script, ["script_uuid"]),
+        "uem_search_sensors": (uem_api.search_sensors, ["og_uuid"]),
+        "uem_get_sensor": (uem_api.get_sensor, ["sensor_uuid"]),
         "uem_create_script": (uem_api.create_script, ["og_uuid"]),
+        "uem_create_script_from_json": (uem_api.create_script_from_json, ["script_json"]),
         "uem_create_sensor": (uem_api.create_sensor, ["og_uuid"]),
+        "uem_create_sensor_from_json": (uem_api.create_sensor_from_json, ["sensor_json"]),
     })
 
 
