@@ -8,11 +8,11 @@ Wingman gives AI assistants deep knowledge of Workspace ONE UEM — product docu
 
 | Component | Description | Status |
 |-----------|-------------|--------|
-| [wingman-mcp](wingman-mcp/) | MCP server — documentation search (local RAG) and live UEM API tools | Available |
+| [wingman-mcp](wingman-mcp/) | MCP server — documentation search (local RAG) and live UEM API tools | :green_circle: Available |
 
 ## wingman-mcp
 
-An [MCP server](https://modelcontextprotocol.io) that runs locally and exposes 18 tools to any MCP-compatible AI client (Claude Code, Claude Desktop, Cursor, VS Code Copilot, Windsurf, Codex, and more).
+An [MCP server](https://modelcontextprotocol.io) that runs locally and exposes 40 tools to any MCP-compatible AI client (Claude Code, Claude Desktop, Cursor, VS Code Copilot, Windsurf, Codex, and more).
 
 **Documentation search** — instant, offline search across UEM product docs, REST API reference, and release notes using local RAG. No API keys or network access required.
 
