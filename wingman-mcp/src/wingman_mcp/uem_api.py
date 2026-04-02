@@ -133,6 +133,70 @@ def get_og_children(auth: UEMAuth, og_id: str) -> dict:
     return _get(auth, f"/api/system/groups/{og_id}/children", accept=ACCEPT_V1)
 
 
+def resolve_og(auth: UEMAuth, group_id: Optional[str] = None) -> dict:
+    """Resolve an organization group by its string group ID code.
+
+    If group_id is provided, searches for that specific OG.
+    If omitted, finds the top-level OG (LocationGroupType == "Customer").
+
+    Returns {"og_id": str, "og_uuid": str, "name": str, "group_id": str}.
+    """
+    if group_id:
+        data = search_organization_groups(auth, groupid=group_id)
+        og_list = data.get("LocationGroups", data.get("OrganizationGroups", []))
+        if not og_list:
+            raise RuntimeError(f"No organization group found with group ID '{group_id}'.")
+        og = og_list[0]
+    else:
+        data = search_organization_groups(auth, pagesize=500)
+        og_list = data.get("LocationGroups", data.get("OrganizationGroups", []))
+        if not og_list:
+            raise RuntimeError("No organization groups found for this account.")
+        og = None
+        for o in og_list:
+            if o.get("LocationGroupType") == "Customer":
+                og = o
+                break
+        if og is None:
+            og = og_list[0]
+
+    og_id = str(og.get("Id", {}).get("Value", og.get("Id", "")))
+    og_name = og.get("Name", "unknown")
+    og_group_id = og.get("GroupId", "")
+    og_uuid = og.get("Uuid") or og.get("uuid")
+
+    # Try V2 OG detail to get UUID if not in search results
+    if not og_uuid:
+        try:
+            detail = _get(auth, f"/api/system/groups/{og_id}", accept=ACCEPT_V2)
+            og_uuid = (detail.get("Uuid") or detail.get("uuid")
+                       or detail.get("OrganizationGroupUuid"))
+        except Exception:
+            pass
+
+    # Last resort: look up UUID from profile search (V2 returns OrganizationGroupUuid)
+    if not og_uuid:
+        try:
+            profiles = _get(auth, "/api/mdm/profiles/search",
+                            params={"organizationgroupid": int(og_id), "pagesize": 1},
+                            accept=ACCEPT_V2)
+            for p in profiles.get("ProfileList", []):
+                found = p.get("OrganizationGroupUuid")
+                if found:
+                    og_uuid = found
+                    break
+        except Exception:
+            pass
+
+    if not og_uuid:
+        raise RuntimeError(
+            f"Found OG '{og_name}' (ID: {og_id}) but could not resolve its UUID. "
+            f"Please provide the OG UUID manually."
+        )
+
+    return {"og_id": og_id, "og_uuid": og_uuid, "name": og_name, "group_id": og_group_id}
+
+
 # ---------------------------------------------------------------------------
 # User operations
 # ---------------------------------------------------------------------------
@@ -329,6 +393,44 @@ def get_app(auth: UEMAuth, app_id: str, app_type: str = "internal") -> dict:
                 detail["ApplicationFileName"] = app.get("ApplicationFileName")
                 break
     return detail
+
+
+def upload_app_blob(auth: UEMAuth, file_path: str, og_id: int) -> dict:
+    """Upload an app binary blob to UEM.
+
+    Returns the new blob ID ({"Value": "<id>"}).
+    """
+    import os
+    filename = os.path.basename(file_path)
+    url = (
+        f"{auth.api_base_url}/api/mam/blobs/uploadblob"
+        f"?filename={filename}&organizationgroupid={og_id}"
+    )
+    headers = {
+        "Authorization": f"Bearer {auth.get_token()}",
+        "Accept": ACCEPT_V1,
+        "Content-Type": "application/octet-stream",
+    }
+    with open(file_path, "rb") as f:
+        resp = httpx.post(url, headers=headers, content=f, timeout=120.0)
+    if resp.status_code >= 400:
+        detail = resp.text[:500] if resp.text else ""
+        raise httpx.HTTPStatusError(
+            f"{resp.status_code} {resp.reason_phrase}: {detail}",
+            request=resp.request,
+            response=resp,
+        )
+    return resp.json()
+
+
+def create_internal_app(auth: UEMAuth, app_json: dict) -> dict:
+    """Create an internal application via the begininstall endpoint.
+
+    app_json should include: ApplicationName, BlobId, DeviceType,
+    LocationGroupId, FileName, and other metadata fields.
+    """
+    return _post(auth, "/api/mam/apps/internal/begininstall",
+                 body=app_json, accept=ACCEPT_V1)
 
 
 def download_app_blob(auth: UEMAuth, blob_uuid: str, output_dir: str,

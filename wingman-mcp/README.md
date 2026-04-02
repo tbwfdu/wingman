@@ -4,7 +4,7 @@
 
 MCP server providing Workspace ONE UEM documentation search via local RAG and live API access to your UEM environment.
 
-Exposes 33 tools over the [Model Context Protocol](https://modelcontextprotocol.io):
+Exposes 40 tools over the [Model Context Protocol](https://modelcontextprotocol.io):
 
 ### Documentation search (local RAG — no auth required)
 
@@ -15,6 +15,12 @@ Exposes 33 tools over the [Model Context Protocol](https://modelcontextprotocol.
 | `search_release_notes` | Release notes by version (what's new, bug fixes, resolved issues) |
 
 ### Live UEM API (requires auth — see [UEM API Authentication](#uem-api-authentication) below)
+
+#### Environments
+
+| Tool | Description |
+|------|-------------|
+| `uem_list_environments` | List all configured UEM environments and their connection status |
 
 #### Devices
 
@@ -82,11 +88,30 @@ Exposes 33 tools over the [Model Context Protocol](https://modelcontextprotocol.
 | `uem_search_baseline_policies` | Browse GPO policies in a baseline catalog version |
 | `uem_get_baseline_policy` | Get full details of a baseline policy by UUID |
 
+#### Export (backup)
+
+| Tool | Description |
+|------|-------------|
+| `uem_export_all` | Export all resources (scripts, sensors, profiles, apps) from an OG to disk |
+
+Exports create a timestamped directory with a `manifest.json` and individual JSON files for each resource. App binaries are optionally downloaded alongside metadata. All fields (including read-only ones) are preserved. Exported resources can be re-imported using the `create_*_from_json` tools.
+
+#### Migration (cross-environment)
+
+| Tool | Description |
+|------|-------------|
+| `uem_migrate_scripts` | Migrate all scripts from one UEM environment/OG to another |
+| `uem_migrate_sensors` | Migrate all sensors from one UEM environment/OG to another |
+| `uem_migrate_profiles` | Migrate V2-compatible profiles between environments (with optional platform filter) |
+| `uem_migrate_apps` | Migrate internal applications (including binaries) between environments |
+
+Migration tools require two named environments to be configured (source and destination). They skip resources that already exist in the destination by name. Smart group assignments are stripped from profiles since IDs differ between environments.
+
 ## What's included
 
 ```
 wingman-mcp/
-├── wingman_mcp-0.3.2-py3-none-any.whl   # Python package
+├── wingman_mcp-0.4.0-py3-none-any.whl   # Python package
 ├── stores/                                # Pre-built RAG databases
 │   ├── uem/                               #   UEM product documentation
 │   ├── api/                               #   REST API reference
@@ -103,7 +128,7 @@ wingman-mcp/
 ### 1. Install the package
 
 ```bash
-pip install wingman_mcp-0.3.2-py3-none-any.whl
+pip install wingman_mcp-0.4.0-py3-none-any.whl
 ```
 
 ### 2. Place the stores
@@ -291,6 +316,45 @@ WINGMAN_MCP_DATA_DIR=/path/to/stores wingman-mcp serve
 
 Connect any MCP client to its stdin/stdout.
 
+## Export (backup)
+
+Export all UEM resources from an organization group to disk:
+
+```bash
+wingman-mcp export
+```
+
+That's it. By default this uses the `default` environment, auto-detects the top-level OG, and saves to `~/.wingman-mcp/exports/`. A timestamped subdirectory is created for each export:
+
+```
+~/.wingman-mcp/exports/export_20260402_143000/
+├── manifest.json        # Export metadata, counts, errors
+├── scripts/             # Full script JSON (including base64 script_data)
+├── sensors/             # Full sensor JSON (including base64 script_data)
+├── profiles/            # Full profile JSON (V2 or metadata-transforms)
+└── apps/                # App metadata JSON
+    └── blobs/           # App binary files
+```
+
+Options:
+
+```bash
+# Export from a named environment
+wingman-mcp export --env prod
+
+# Export a specific OG by its group ID code (instead of auto-detecting the top-level one)
+wingman-mcp export --group-id mychildog
+
+# Custom output directory
+wingman-mcp export -o ~/backups
+
+# Export only specific resource types
+wingman-mcp export --types scripts sensors
+
+# Skip large app binary downloads
+wingman-mcp export --no-blobs
+```
+
 ## UEM API Authentication
 
 The live API tools connect to your Workspace ONE UEM environment using OAuth 2.0 (client credentials). This is optional — the RAG documentation search tools work without it.
@@ -310,6 +374,29 @@ wingman-mcp auth set
 
 This prompts for each value interactively. Secrets (Client ID and Client Secret) are stored in your OS keychain (macOS Keychain, Windows Credential Manager, or Linux Secret Service). The Token URL and API Base URL are stored in `~/.wingman-mcp/config.json`.
 
+### Multiple environments
+
+You can configure multiple UEM environments (e.g. dev, staging, prod) using the `--env` flag:
+
+```bash
+# Configure a named environment
+wingman-mcp auth set --env prod
+wingman-mcp auth set --env dev
+
+# List all configured environments
+wingman-mcp auth list
+
+# Test a specific environment
+wingman-mcp auth test --env prod
+
+# Show status for a specific environment
+wingman-mcp auth status --env prod
+```
+
+When calling UEM API tools, pass the `env` parameter to target a specific environment. If omitted, the `default` environment is used.
+
+Migration tools (`uem_migrate_*`) accept separate `source_env` and `dest_env` parameters to move resources between environments.
+
 ### Verify configuration
 
 ```bash
@@ -324,6 +411,9 @@ wingman-mcp auth test
 
 ```bash
 wingman-mcp auth clear
+
+# Clear a specific environment
+wingman-mcp auth clear --env prod
 ```
 
 ### Environment variable overrides
@@ -336,6 +426,8 @@ export WINGMAN_MCP_CLIENT_SECRET="your-client-secret"
 export WINGMAN_MCP_TOKEN_URL="https://na.uemauth.workspaceone.com/connect/token"
 export WINGMAN_MCP_API_URL="https://as1831.awmdm.com"
 ```
+
+Note: environment variables override credentials for all named environments. They are best suited for single-environment setups (CI/Docker).
 
 ## Troubleshooting
 
