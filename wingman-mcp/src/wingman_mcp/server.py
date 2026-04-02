@@ -14,7 +14,7 @@ app = Server("wingman-mcp")
 # Lazy-loaded stores and auth
 _stores: dict[str, Any] = {}
 _embeddings = None
-_auth = None
+_auths: dict[str, Any] = {}  # keyed by environment name
 
 
 def _get_embeddings():
@@ -25,17 +25,16 @@ def _get_embeddings():
     return _embeddings
 
 
-def _get_auth():
-    """Return a UEMAuth instance if credentials are configured, else None."""
-    global _auth
-    if _auth is None:
+def _get_auth(env_name: str = "default"):
+    """Return a UEMAuth instance for the given environment, or None."""
+    if env_name not in _auths:
         from wingman_mcp.credentials import load_credentials
-        creds = load_credentials()
+        creds = load_credentials(env_name)
         if creds is None:
             return None
         from wingman_mcp.auth import UEMAuth
-        _auth = UEMAuth(creds)
-    return _auth
+        _auths[env_name] = UEMAuth(creds)
+    return _auths[env_name]
 
 
 def _get_store(store_key: str):
@@ -128,6 +127,19 @@ TOOLS = [
     # -----------------------------------------------------------------------
     # UEM API tools (require auth via 'wingman-mcp auth set')
     # -----------------------------------------------------------------------
+    Tool(
+        name="uem_list_environments",
+        description=(
+            "List all configured UEM environments. "
+            "Environments are set up with 'wingman-mcp auth set --env <name>'. "
+            "Use environment names in the 'env' parameter of other UEM tools."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    ),
     Tool(
         name="uem_search_devices",
         description=(
@@ -675,7 +687,144 @@ TOOLS = [
             "required": ["sensor_json"],
         },
     ),
+    # -----------------------------------------------------------------------
+    # Export tools
+    # -----------------------------------------------------------------------
+    Tool(
+        name="uem_export_all",
+        description=(
+            "Export all UEM resources from an organization group to disk as a backup. "
+            "Saves scripts, sensors, profiles, and app metadata/binaries as JSON files "
+            "in a timestamped export directory with a manifest.json. "
+            "If group_id is omitted, the top-level OG for the authenticated "
+            "account is used automatically. "
+            "All fields (including read-only ones) are preserved for reference. "
+            "Exported scripts and sensors can be re-imported with "
+            "uem_create_script_from_json / uem_create_sensor_from_json. "
+            "V2 profiles can be re-imported with uem_create_profile."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "group_id": {"type": "string", "description": "OG group ID code (default: top-level OG for the account)"},
+                "output_dir": {"type": "string", "description": "Directory to save the export (default: ~/.wingman-mcp/exports)"},
+                "resource_types": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["scripts", "sensors", "profiles", "apps"]},
+                    "description": "Resource types to export (default: all four)",
+                },
+                "include_app_blobs": {
+                    "type": "boolean",
+                    "description": "Download app binary blobs (default: true, can be slow for large apps)",
+                },
+            },
+            "required": [],
+        },
+    ),
+    # -----------------------------------------------------------------------
+    # Migration tools
+    # -----------------------------------------------------------------------
+    Tool(
+        name="uem_migrate_scripts",
+        description=(
+            "Migrate all scripts from one UEM environment to another. "
+            "Reads every script from the source organization group, then creates them "
+            "in the destination organization group in the destination environment. "
+            "Skips scripts whose name already exists in the destination. "
+            "Returns a summary of migrated, skipped, and failed scripts."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source_env": {"type": "string", "description": "Source environment name"},
+                "dest_env": {"type": "string", "description": "Destination environment name"},
+                "source_og_uuid": {"type": "string", "description": "Source organization group UUID"},
+                "dest_og_uuid": {"type": "string", "description": "Destination organization group UUID"},
+            },
+            "required": ["source_env", "dest_env", "source_og_uuid", "dest_og_uuid"],
+        },
+    ),
+    Tool(
+        name="uem_migrate_sensors",
+        description=(
+            "Migrate all sensors from one UEM environment to another. "
+            "Reads every sensor from the source organization group, then creates them "
+            "in the destination organization group in the destination environment. "
+            "Skips sensors whose name already exists in the destination. "
+            "Returns a summary of migrated, skipped, and failed sensors."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source_env": {"type": "string", "description": "Source environment name"},
+                "dest_env": {"type": "string", "description": "Destination environment name"},
+                "source_og_uuid": {"type": "string", "description": "Source organization group UUID"},
+                "dest_og_uuid": {"type": "string", "description": "Destination organization group UUID"},
+            },
+            "required": ["source_env", "dest_env", "source_og_uuid", "dest_og_uuid"],
+        },
+    ),
+    Tool(
+        name="uem_migrate_profiles",
+        description=(
+            "Migrate device profiles from one UEM environment to another. "
+            "Reads profiles from the source OG (optionally filtered by platform), "
+            "then creates them in the destination OG. Only V2-compatible profiles "
+            "can be migrated (Windows: all, Apple/Android: V2 payloads like Custom "
+            "Settings, WiFi, VPN, SCEP, SSO Extension, etc.). Non-V2 profiles are "
+            "skipped with a warning. Smart group assignments are stripped since "
+            "smart group IDs differ between environments."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source_env": {"type": "string", "description": "Source environment name"},
+                "dest_env": {"type": "string", "description": "Destination environment name"},
+                "source_og_id": {"type": "string", "description": "Source organization group numeric ID"},
+                "dest_og_id": {"type": "string", "description": "Destination organization group numeric ID"},
+                "platform": {"type": "string", "description": "Optional platform filter (Apple, Android, WinRT)"},
+            },
+            "required": ["source_env", "dest_env", "source_og_id", "dest_og_id"],
+        },
+    ),
+    Tool(
+        name="uem_migrate_apps",
+        description=(
+            "Migrate internal applications from one UEM environment to another. "
+            "Downloads each app binary from the source environment, uploads it to "
+            "the destination, and creates the app with matching metadata. "
+            "Only internal apps can be migrated — public and purchased apps are skipped. "
+            "Large apps may take time to transfer."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source_env": {"type": "string", "description": "Source environment name"},
+                "dest_env": {"type": "string", "description": "Destination environment name"},
+                "source_og_id": {"type": "string", "description": "Source organization group numeric ID"},
+                "dest_og_id": {"type": "string", "description": "Destination organization group numeric ID"},
+            },
+            "required": ["source_env", "dest_env", "source_og_id", "dest_og_id"],
+        },
+    ),
 ]
+
+# Inject 'env' parameter into all UEM API tool schemas (except uem_list_environments)
+_ENV_PROPERTY = {
+    "env": {
+        "type": "string",
+        "description": (
+            "Named environment to use (from 'wingman-mcp auth list'). "
+            "Defaults to 'default'."
+        ),
+    }
+}
+_SKIP_ENV_INJECTION = {"uem_list_environments", "uem_migrate_scripts",
+                       "uem_migrate_sensors", "uem_migrate_profiles",
+                       "uem_migrate_apps"}
+for _tool in TOOLS:
+    if _tool.name.startswith("uem_") and _tool.name not in _SKIP_ENV_INJECTION:
+        _tool.inputSchema["properties"].update(_ENV_PROPERTY)
 
 
 @app.list_tools()
@@ -683,14 +832,14 @@ async def list_tools() -> list[Tool]:
     return TOOLS
 
 
-def _require_auth() -> "UEMAuth":
+def _require_auth(env_name: str = "default") -> "UEMAuth":
     """Return a UEMAuth instance or raise with a user-friendly message."""
-    auth = _get_auth()
+    auth = _get_auth(env_name)
     if auth is None:
         raise RuntimeError(
-            "UEM API credentials are not configured. "
-            "Run 'wingman-mcp auth set' to provide your Client ID, Client Secret, "
-            "Token URL, and API Base URL."
+            f"UEM API credentials are not configured for environment '{env_name}'. "
+            f"Run 'wingman-mcp auth set --env {env_name}' to provide your Client ID, "
+            "Client Secret, Token URL, and API Base URL."
         )
     return auth
 
@@ -702,6 +851,7 @@ _API_TOOLS: dict[str, tuple] = {}
 def _register_api_tools():
     """Build the dispatch table for UEM API tools."""
     from wingman_mcp import uem_api
+    from wingman_mcp import export
 
     _API_TOOLS.update({
         "uem_search_devices": (uem_api.search_devices, None),
@@ -735,7 +885,60 @@ def _register_api_tools():
         "uem_create_script_from_json": (uem_api.create_script_from_json, ["script_json"]),
         "uem_create_sensor": (uem_api.create_sensor, ["og_uuid"]),
         "uem_create_sensor_from_json": (uem_api.create_sensor_from_json, ["sensor_json"]),
+        "uem_export_all": (export.export_all, None),
     })
+
+
+# Migration tool names
+_MIGRATION_TOOLS = {
+    "uem_migrate_scripts",
+    "uem_migrate_sensors",
+    "uem_migrate_profiles",
+    "uem_migrate_apps",
+}
+
+
+def _handle_migration(name: str, arguments: dict) -> list[TextContent]:
+    """Dispatch migration tool calls."""
+    from wingman_mcp import migration
+
+    source_env = arguments["source_env"]
+    dest_env = arguments["dest_env"]
+
+    try:
+        source_auth = _require_auth(source_env)
+        dest_auth = _require_auth(dest_env)
+    except RuntimeError as e:
+        return [TextContent(type="text", text=str(e))]
+
+    try:
+        if name == "uem_migrate_scripts":
+            result = migration.migrate_scripts(
+                source_auth, dest_auth,
+                arguments["source_og_uuid"], arguments["dest_og_uuid"],
+            )
+        elif name == "uem_migrate_sensors":
+            result = migration.migrate_sensors(
+                source_auth, dest_auth,
+                arguments["source_og_uuid"], arguments["dest_og_uuid"],
+            )
+        elif name == "uem_migrate_profiles":
+            result = migration.migrate_profiles(
+                source_auth, dest_auth,
+                arguments["source_og_id"], arguments["dest_og_id"],
+                platform=arguments.get("platform"),
+            )
+        elif name == "uem_migrate_apps":
+            result = migration.migrate_apps(
+                source_auth, dest_auth,
+                arguments["source_og_id"], arguments["dest_og_id"],
+            )
+        else:
+            return [TextContent(type="text", text=f"Unknown migration tool: {name}")]
+
+        return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+    except Exception as e:
+        return [TextContent(type="text", text=f"Migration error: {e}")]
 
 
 @app.call_tool()
@@ -773,13 +976,30 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text="No results found.")]
         return [TextContent(type="text", text=json.dumps(results, indent=2))]
 
+    # --- UEM list environments (no auth required) ---
+    if name == "uem_list_environments":
+        from wingman_mcp.credentials import list_environments, get_status
+        envs = list_environments()
+        result = {
+            "environments": envs,
+            "count": len(envs),
+            "details": {e: get_status(e) for e in envs},
+        }
+        return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+
     # --- UEM API tools ---
     if not _API_TOOLS:
         _register_api_tools()
 
+    # --- UEM migration tools ---
+    if name in _MIGRATION_TOOLS:
+        return _handle_migration(name, arguments)
+
     if name in _API_TOOLS:
+        # Extract env from arguments (don't pass it to the API function)
+        env_name = arguments.pop("env", "default")
         try:
-            auth = _require_auth()
+            auth = _require_auth(env_name)
         except RuntimeError as e:
             return [TextContent(type="text", text=str(e))]
 

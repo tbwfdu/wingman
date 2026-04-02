@@ -2,7 +2,10 @@
 import argparse
 import asyncio
 import getpass
+import json
+import os
 import sys
+from pathlib import Path
 
 
 def cmd_serve(args):
@@ -52,7 +55,7 @@ def cmd_ingest(args):
 def cmd_status(args):
     """Show store status."""
     from wingman_mcp.config import get_store_dir, STORE_KEYS
-    from wingman_mcp.credentials import get_status
+    from wingman_mcp.credentials import get_status, list_environments
     from pathlib import Path
 
     print("RAG Stores:")
@@ -66,9 +69,44 @@ def cmd_status(args):
             print(f"  {key}: not found ({store_dir})")
 
     print("\nUEM Auth:")
-    status = get_status()
-    for k, v in status.items():
-        print(f"  {k}: {v}")
+    envs = list_environments()
+    if not envs:
+        print("  No environments configured.")
+    else:
+        all_status = get_status()
+        if "environments" in all_status:
+            print(f"  {all_status['configured_environments']} environment(s)")
+            for name, env_status in all_status["environments"].items():
+                api_url = env_status.get("api_base_url", "(missing)")
+                configured = env_status.get("configured", "no")
+                marker = "+" if configured == "yes" else "-"
+                print(f"  [{marker}] {name}: {api_url}")
+
+
+def cmd_export(args):
+    """Export all UEM resources to disk."""
+    from wingman_mcp.credentials import load_credentials
+    from wingman_mcp.auth import UEMAuth
+    from wingman_mcp.export import export_all
+
+    env_name = args.env
+    creds = load_credentials(env_name)
+    if creds is None:
+        print(f"Error: credentials not configured for '{env_name}'. "
+              f"Run 'wingman-mcp auth set --env {env_name}'.")
+        sys.exit(1)
+
+    auth = UEMAuth(creds)
+    resource_types = args.types if args.types else None
+
+    result = export_all(
+        auth=auth,
+        group_id=args.group_id,
+        output_dir=args.output_dir,
+        resource_types=resource_types,
+        include_app_blobs=not args.no_blobs,
+    )
+    print(json.dumps(result, indent=2, default=str))
 
 
 # ---------------------------------------------------------------------------
@@ -78,23 +116,26 @@ def cmd_status(args):
 def cmd_auth(args):
     """Dispatch auth subcommands."""
     action = getattr(args, "auth_action", None)
+    env_name = getattr(args, "env", "default")
     if action == "set":
-        _auth_set()
+        _auth_set(env_name)
     elif action == "status":
-        _auth_status()
+        _auth_status(env_name)
     elif action == "clear":
-        _auth_clear()
+        _auth_clear(env_name)
     elif action == "test":
-        _auth_test()
+        _auth_test(env_name)
+    elif action == "list":
+        _auth_list()
     else:
-        print("Usage: wingman-mcp auth {set,status,clear,test}")
+        print("Usage: wingman-mcp auth {set,status,clear,test,list}")
         sys.exit(1)
 
 
-def _auth_set():
+def _auth_set(env_name: str):
     from wingman_mcp.credentials import save_credentials
 
-    print("Configure UEM API credentials")
+    print(f"Configure UEM API credentials (environment: {env_name})")
     print("(secrets are stored in your OS keychain)\n")
 
     api_base_url = input("UEM API Base URL (e.g. https://as1831.awmdm.com): ").strip()
@@ -117,35 +158,38 @@ def _auth_set():
         print("Error: Client Secret is required.")
         sys.exit(1)
 
-    save_credentials(client_id, client_secret, token_url, api_base_url)
-    print("\nCredentials saved.")
+    save_credentials(client_id, client_secret, token_url, api_base_url, env_name=env_name)
+    print(f"\nCredentials saved for environment '{env_name}'.")
 
 
-def _auth_status():
+def _auth_status(env_name: str):
     from wingman_mcp.credentials import get_status
 
-    status = get_status()
+    # If user explicitly passed --env, show that env; otherwise show all
+    status = get_status(env_name)
+    print(f"  [{env_name}]")
     for k, v in status.items():
-        print(f"  {k}: {v}")
+        print(f"    {k}: {v}")
 
 
-def _auth_clear():
+def _auth_clear(env_name: str):
     from wingman_mcp.credentials import clear_credentials
 
-    clear_credentials()
-    print("Credentials cleared.")
+    clear_credentials(env_name)
+    print(f"Credentials cleared for environment '{env_name}'.")
 
 
-def _auth_test():
+def _auth_test(env_name: str):
     from wingman_mcp.credentials import load_credentials
     from wingman_mcp.auth import UEMAuth
 
-    creds = load_credentials()
+    creds = load_credentials(env_name)
     if creds is None:
-        print("Error: UEM credentials not configured. Run 'wingman-mcp auth set' first.")
+        print(f"Error: UEM credentials not configured for environment '{env_name}'. "
+              f"Run 'wingman-mcp auth set --env {env_name}' first.")
         sys.exit(1)
 
-    print(f"Testing connection to {creds['token_url']} ...")
+    print(f"Testing connection for environment '{env_name}' to {creds['token_url']} ...")
     auth = UEMAuth(creds)
     result = auth.test_connection()
 
@@ -155,6 +199,24 @@ def _auth_test():
     else:
         print(f"  Failed: {result['error']}")
         sys.exit(1)
+
+
+def _auth_list():
+    from wingman_mcp.credentials import list_environments, get_status
+
+    envs = list_environments()
+    if not envs:
+        print("  No environments configured.")
+        print("  Run 'wingman-mcp auth set --env <name>' to add one.")
+        return
+
+    print(f"  {len(envs)} environment(s) configured:\n")
+    for name in envs:
+        status = get_status(name)
+        api_url = status.get("api_base_url", "(missing)")
+        configured = status.get("configured", "no")
+        marker = "+" if configured == "yes" else "-"
+        print(f"  [{marker}] {name}: {api_url}")
 
 
 def main():
@@ -170,12 +232,32 @@ def main():
     ingest_parser.add_argument("--max-workers", type=int, default=50, help="Parallel fetch workers (default: 50)")
     ingest_parser.add_argument("--batch-size", type=int, default=500, help="Embedding batch size (default: 500)")
 
+    export_parser = sub.add_parser("export", help="Export all UEM resources to disk")
+    export_parser.add_argument("--env", "-e", default="default", help="Environment name (default: 'default')")
+    export_parser.add_argument("--group-id", "-g", default=None,
+                               help="OG group ID code (default: top-level OG for the account)")
+    export_parser.add_argument("--output-dir", "-o", default=os.path.join(str(Path.home()), ".wingman-mcp", "exports"),
+                               help="Output directory (default: ~/.wingman-mcp/exports)")
+    export_parser.add_argument("--types", nargs="+",
+                               choices=["scripts", "sensors", "profiles", "apps"],
+                               help="Resource types to export (default: all)")
+    export_parser.add_argument("--no-blobs", action="store_true",
+                               help="Skip downloading app binaries")
+
     auth_parser = sub.add_parser("auth", help="Manage UEM API credentials")
     auth_sub = auth_parser.add_subparsers(dest="auth_action")
-    auth_sub.add_parser("set", help="Set UEM API credentials (interactive)")
-    auth_sub.add_parser("status", help="Show current auth configuration")
-    auth_sub.add_parser("clear", help="Remove stored credentials")
-    auth_sub.add_parser("test", help="Test OAuth token fetch")
+
+    for name, help_text in [
+        ("set", "Set UEM API credentials (interactive)"),
+        ("status", "Show auth configuration (all envs if --env not specified)"),
+        ("clear", "Remove stored credentials"),
+        ("test", "Test OAuth token fetch"),
+    ]:
+        p = auth_sub.add_parser(name, help=help_text)
+        p.add_argument("--env", "-e", default="default",
+                        help="Environment name (default: 'default')")
+
+    auth_sub.add_parser("list", help="List all configured environments")
 
     args = parser.parse_args()
 
@@ -187,6 +269,8 @@ def main():
         cmd_ingest(args)
     elif args.command == "status":
         cmd_status(args)
+    elif args.command == "export":
+        cmd_export(args)
     elif args.command == "auth":
         cmd_auth(args)
     else:
