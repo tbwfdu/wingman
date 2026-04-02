@@ -24,7 +24,7 @@ See [wingman-mcp/README.md](wingman-mcp/README.md) for setup instructions and th
 
 ```bash
 # Install
-pip install wingman-mcp/wingman_mcp-0.2.0-py3-none-any.whl
+pip install wingman-mcp/wingman_mcp-(version)-py3-none-any.whl
 
 # Place the pre-built RAG stores
 mkdir -p ~/.wingman-mcp
