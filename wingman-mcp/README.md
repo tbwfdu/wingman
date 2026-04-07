@@ -131,7 +131,31 @@ wingman-mcp/
 pip install wingman_mcp-0.4.0-py3-none-any.whl
 ```
 
-### 2. Place the stores
+> **Multiple Python versions?** If you have more than one Python version installed (via pyenv, Homebrew, system Python, etc.), make sure you install with Python 3.10+. See [Installing with multiple Python versions](#installing-with-multiple-python-versions) below.
+
+### 2. Find the binary path
+
+After installing, find the full path to the `wingman-mcp` binary — you'll need this for client configuration:
+
+```bash
+which wingman-mcp
+```
+
+Example output:
+
+```
+/Users/you/.pyenv/versions/3.12.4/bin/wingman-mcp       # pyenv
+/Users/you/.venvs/wingman/bin/wingman-mcp                # venv
+/Users/you/miniconda3/envs/wingman/bin/wingman-mcp       # conda
+/opt/homebrew/bin/wingman-mcp                            # Homebrew Python
+/usr/local/bin/wingman-mcp                               # system pip
+```
+
+> **Tip:** If `which wingman-mcp` returns nothing, the install location isn't on your PATH. Use `find` or `pip show` to locate it — see [Troubleshooting](#troubleshooting).
+
+Use the full path as the `command` in your MCP client configuration to avoid PATH issues. For example, instead of `"command": "wingman-mcp"`, use `"command": "/Users/you/.pyenv/versions/3.12.4/bin/wingman-mcp"`.
+
+### 3. Place the stores
 
 Copy the included `stores/` folder to a permanent location. The default location is `~/.wingman-mcp/stores/`:
 
@@ -146,7 +170,7 @@ Or keep them wherever you like and set the environment variable:
 export WINGMAN_MCP_DATA_DIR=/path/to/stores
 ```
 
-### 3. Verify
+### 4. Verify
 
 ```bash
 wingman-mcp status
@@ -156,11 +180,13 @@ You should see all three stores listed with their sizes.
 
 ## Client configuration
 
-The server uses **stdio** transport, which is supported by all MCP-compatible clients. The command to start the server is always:
+The server uses **stdio** transport, which is supported by all MCP-compatible clients. The command to start the server is:
 
 ```
 wingman-mcp serve
 ```
+
+> **Full path recommended:** MCP clients launch the server as a subprocess without your shell profile, so pyenv/conda/venv may not be active. Use the full binary path from `which wingman-mcp` (e.g. `"/Users/you/.venvs/wingman/bin/wingman-mcp"`) to avoid "command not found" errors.
 
 If you placed the stores in the default location (`~/.wingman-mcp/stores/`), no `env` block is needed. If you placed them elsewhere, add the `WINGMAN_MCP_DATA_DIR` env variable as shown below.
 
@@ -429,10 +455,85 @@ export WINGMAN_MCP_API_URL="https://as1831.awmdm.com"
 
 Note: environment variables override credentials for all named environments. They are best suited for single-environment setups (CI/Docker).
 
+## Installing with multiple Python versions
+
+If you have multiple Python versions installed, a bare `pip install` may install against the wrong one. Use one of the approaches below to ensure you're using Python 3.10+.
+
+### pyenv
+
+```bash
+# Check available versions
+pyenv versions
+
+# Set your shell to a 3.10+ version (if not already)
+pyenv shell 3.12.4
+
+# Install
+pip install wingman_mcp-0.4.0-py3-none-any.whl
+
+# Confirm the binary location
+which wingman-mcp
+# → /Users/you/.pyenv/versions/3.12.4/bin/wingman-mcp
+```
+
+### venv (recommended for isolation)
+
+```bash
+# Create a virtual environment with Python 3.10+
+python3.12 -m venv ~/.venvs/wingman
+
+# Activate it
+source ~/.venvs/wingman/bin/activate
+
+# Install
+pip install wingman_mcp-0.4.0-py3-none-any.whl
+
+# Confirm the binary location
+which wingman-mcp
+# → /Users/you/.venvs/wingman/bin/wingman-mcp
+
+# You can deactivate now — the binary stays at the path above
+deactivate
+```
+
+> **Important:** When using a venv, you must use the full path to the binary in your MCP client configuration (e.g. `"/Users/you/.venvs/wingman/bin/wingman-mcp"`), since the venv won't be activated when the MCP client starts the server.
+
+### conda
+
+```bash
+# Create an environment with Python 3.10+
+conda create -n wingman python=3.12 -y
+
+# Activate it
+conda activate wingman
+
+# Install
+pip install wingman_mcp-0.4.0-py3-none-any.whl
+
+# Confirm the binary location
+which wingman-mcp
+# → /Users/you/miniconda3/envs/wingman/bin/wingman-mcp
+```
+
+> **Important:** As with venv, use the full binary path in your MCP client configuration since the conda environment won't be activated when the MCP client starts the server.
+
+### Specifying Python explicitly (no version manager)
+
+If you have multiple Python versions but don't use pyenv/conda, target the right one directly:
+
+```bash
+# Use a specific Python version's pip
+python3.12 -m pip install wingman_mcp-0.4.0-py3-none-any.whl
+
+# Find where it installed
+python3.12 -m pip show wingman-mcp | grep Location
+```
+
 ## Troubleshooting
 
 - **"RAG stores not found"** — Copy the stores folder. See Setup Step 2.
 - **"UEM API credentials are not configured"** — Run `wingman-mcp auth set` to provide your OAuth credentials.
 - **"HTTP 401" from auth test** — Double-check your Client ID, Client Secret, and Token URL.
-- **Server not detected** — Make sure `wingman-mcp` is on your PATH. Run `which wingman-mcp` to confirm.
-- **Wrong Python** — If you installed in a virtualenv, use the full path to the binary in your client config, e.g. `"/Users/you/.venvs/wingman/bin/wingman-mcp"`.
+- **Server not detected** — Make sure `wingman-mcp` is on your PATH. Run `which wingman-mcp` to confirm. If it returns nothing, the binary isn't on your PATH — use `pip show wingman-mcp` to find the install location, then look for the binary in the `bin/` directory alongside that location.
+- **Wrong Python** — If you installed in a virtualenv or conda env, use the full path to the binary in your client config, e.g. `"/Users/you/.venvs/wingman/bin/wingman-mcp"`. See [Installing with multiple Python versions](#installing-with-multiple-python-versions).
+- **`pip install` fails with Python version error** — You're running pip from a Python version below 3.10. Use `python3.12 -m pip install ...` or activate the correct pyenv/conda/venv first.
