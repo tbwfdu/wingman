@@ -45,9 +45,24 @@ def _open_store(store_dir: str):
     return Chroma(persist_directory=store_dir, embedding_function=_NullEmbeddings())
 
 
+def _iter_metadatas(vectorstore, page_size: int = 2000):
+    """Yield metadatas in pages (Chroma's SQLite backend chokes on single
+    get() calls for large collections — SQL variable limit)."""
+    offset = 0
+    while True:
+        data = vectorstore.get(include=["metadatas"], limit=page_size, offset=offset)
+        metas = data.get("metadatas") or []
+        if not metas:
+            return
+        for m in metas:
+            yield m
+        if len(metas) < page_size:
+            return
+        offset += len(metas)
+
+
 def _distinct_sources(vectorstore) -> set[str]:
-    data = vectorstore.get(include=["metadatas"])
-    return {m.get("source") for m in (data.get("metadatas") or []) if m and m.get("source")}
+    return {m.get("source") for m in _iter_metadatas(vectorstore) if m and m.get("source")}
 
 
 def _fmt(n: int) -> str:
@@ -176,9 +191,8 @@ def check_api(store_dir: str) -> dict:
             live_sigs[name] = set()
 
     vs = _open_store(store_dir)
-    data = vs.get(include=["metadatas"])
     stored_sigs: dict[str, set[tuple[str, str]]] = {}
-    for m in (data.get("metadatas") or []):
+    for m in _iter_metadatas(vs):
         if not m:
             continue
         g = m.get("api_group")
@@ -233,8 +247,7 @@ def check_release_notes(store_dir: str) -> dict:
         return {"store": "release_notes", "status": "missing"}
 
     vs = _open_store(store_dir)
-    data = vs.get(include=["metadatas"])
-    stored_versions = {m.get("version") for m in (data.get("metadatas") or []) if m and m.get("version")}
+    stored_versions = {m.get("version") for m in _iter_metadatas(vs) if m and m.get("version")}
 
     configured = set(VERSION_MAP.keys())
     new_versions = configured - stored_versions
