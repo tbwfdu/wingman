@@ -10,8 +10,12 @@ from pathlib import Path
 
 def cmd_serve(args):
     """Run the MCP server."""
-    from wingman_mcp.server import run_server
-    asyncio.run(run_server())
+    if args.http:
+        from wingman_mcp.server import run_http_server
+        asyncio.run(run_http_server(host=args.host, port=args.port))
+    else:
+        from wingman_mcp.server import run_server
+        asyncio.run(run_server())
 
 
 def cmd_setup(args):
@@ -223,7 +227,19 @@ def main():
     parser = argparse.ArgumentParser(prog="wingman-mcp", description="Workspace ONE UEM documentation search MCP server")
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("serve", help="Run the MCP server (stdio transport)")
+    serve_parser = sub.add_parser("serve", help="Run the MCP server (stdio or HTTP transport)")
+    serve_parser.add_argument(
+        "--http", action="store_true",
+        help="Run over Streamable HTTP instead of stdio (for hosted deployments)",
+    )
+    serve_parser.add_argument(
+        "--host", default="0.0.0.0",
+        help="Bind host for HTTP mode (default: 0.0.0.0)",
+    )
+    serve_parser.add_argument(
+        "--port", type=int, default=8000,
+        help="Bind port for HTTP mode (default: 8000)",
+    )
     sub.add_parser("setup", help="Download pre-built RAG stores")
     sub.add_parser("status", help="Show store and auth status")
 

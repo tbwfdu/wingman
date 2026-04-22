@@ -27,6 +27,10 @@ ingest = [
     "tqdm",
     "python-dotenv",
 ]
+cloud = [
+    "starlette>=0.40.0",
+    "uvicorn>=0.30.0",
+]
 
 [project.scripts]
 wingman-mcp = "wingman_mcp.cli:main"

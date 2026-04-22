@@ -1,4 +1,5 @@
 """MCP server exposing Workspace ONE UEM documentation search tools."""
+import hashlib
 import json
 from typing import Any
 
@@ -14,7 +15,10 @@ app = Server("wingman-mcp")
 # Lazy-loaded stores and auth
 _stores: dict[str, Any] = {}
 _embeddings = None
-_auths: dict[str, Any] = {}  # keyed by environment name
+# In local/stdio mode: keyed by environment name.
+# In HTTP mode: keyed by SHA-256 of credential values (so different users get
+# separate UEMAuth instances with their own token caches).
+_auths: dict[str, Any] = {}
 
 
 def _get_embeddings():
@@ -26,7 +30,29 @@ def _get_embeddings():
 
 
 def _get_auth(env_name: str = "default"):
-    """Return a UEMAuth instance for the given environment, or None."""
+    """Return a UEMAuth instance or None.
+
+    In HTTP server mode, credentials come from the per-request ContextVar set
+    by CredentialHeaderMiddleware.  In local stdio mode, credentials are loaded
+    from the OS keychain / config file as usual.
+    """
+    from wingman_mcp.request_context import _is_http_request, _request_credentials
+
+    if _is_http_request.get():
+        creds = _request_credentials.get()
+        if creds is None:
+            return None
+        # Cache UEMAuth by a fingerprint of the credentials so that repeated
+        # calls within the same process reuse the token cache.
+        fingerprint = hashlib.sha256(
+            f"{creds['client_id']}:{creds['client_secret']}:{creds['token_url']}:{creds['api_base_url']}".encode()
+        ).hexdigest()
+        if fingerprint not in _auths:
+            from wingman_mcp.auth import UEMAuth
+            _auths[fingerprint] = UEMAuth(creds)
+        return _auths[fingerprint]
+
+    # Local/stdio mode: load from OS keychain + config file.
     if env_name not in _auths:
         from wingman_mcp.credentials import load_credentials
         creds = load_credentials(env_name)
@@ -836,6 +862,13 @@ def _require_auth(env_name: str = "default") -> "UEMAuth":
     """Return a UEMAuth instance or raise with a user-friendly message."""
     auth = _get_auth(env_name)
     if auth is None:
+        from wingman_mcp.request_context import _is_http_request
+        if _is_http_request.get():
+            raise RuntimeError(
+                "UEM API credentials not provided. Add the following headers to your "
+                "MCP server configuration: X-UEM-Client-ID, X-UEM-Client-Secret, "
+                "X-UEM-Token-URL, X-UEM-API-URL."
+            )
         raise RuntimeError(
             f"UEM API credentials are not configured for environment '{env_name}'. "
             f"Run 'wingman-mcp auth set --env {env_name}' to provide your Client ID, "
@@ -1021,3 +1054,61 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 async def run_server():
     async with stdio_server() as (read, write):
         await app.run(read, write, app.create_initialization_options())
+
+
+async def run_http_server(host: str = "0.0.0.0", port: int = 8000) -> None:
+    """Run the MCP server over Streamable HTTP for hosted/cloud deployments.
+
+    Each user's UEM credentials are passed via request headers and are never
+    stored server-side.  The server acts as a stateless proxy.
+
+    Required dependencies: pip install 'wingman-mcp[cloud]'
+    """
+    try:
+        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+        from starlette.responses import JSONResponse, PlainTextResponse
+        from starlette.types import ASGIApp, Receive, Scope, Send
+        import uvicorn
+    except ImportError as exc:
+        raise SystemExit(
+            f"HTTP mode requires additional dependencies: {exc}\n"
+            "Install with: pip install 'wingman-mcp[cloud]'"
+        ) from exc
+
+    from wingman_mcp.middleware import CredentialHeaderMiddleware
+
+    session_manager = StreamableHTTPSessionManager(
+        app=app,
+        event_store=None,
+        json_response=False,
+        stateless=True,
+    )
+
+    class _App:
+        """Minimal ASGI app: routes /health and /mcp."""
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] == "lifespan":
+                msg = await receive()
+                if msg["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                msg = await receive()
+                if msg["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+            elif scope["type"] == "http":
+                if scope["path"] == "/health":
+                    resp = PlainTextResponse("ok")
+                    await resp(scope, receive, send)
+                else:
+                    await session_manager.handle_request(scope, receive, send)
+
+    asgi_app = CredentialHeaderMiddleware(_App())
+
+    print(f"wingman-mcp HTTP server starting on {host}:{port}")
+    print(f"MCP endpoint : http://{host}:{port}/mcp")
+    print(f"Health check : http://{host}:{port}/health")
+
+    config = uvicorn.Config(asgi_app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+
+    async with session_manager.run():
+        await server.serve()
