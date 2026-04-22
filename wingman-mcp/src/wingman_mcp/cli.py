@@ -56,6 +56,19 @@ def cmd_ingest(args):
     print("\nIngestion complete.")
 
 
+def cmd_check(args):
+    """Report what would change if stores were rebuilt."""
+    try:
+        from wingman_mcp.ingest.check import check_all
+    except ImportError:
+        print("The check command is not available in this distribution "
+              "(ingest extras not installed). Run: pip install -e '.[ingest]'")
+        sys.exit(1)
+
+    targets = args.stores if args.stores else ["api", "uem", "release_notes"]
+    check_all(targets)
+
+
 def cmd_status(args):
     """Show store status."""
     from wingman_mcp.config import get_store_dir, STORE_KEYS
@@ -248,6 +261,9 @@ def main():
     ingest_parser.add_argument("--max-workers", type=int, default=50, help="Parallel fetch workers (default: 50)")
     ingest_parser.add_argument("--batch-size", type=int, default=500, help="Embedding batch size (default: 500)")
 
+    check_parser = sub.add_parser("check", help="Report what would change if stores were rebuilt (no writes)")
+    check_parser.add_argument("stores", nargs="*", choices=["uem", "api", "release_notes"], help="Stores to check (default: all)")
+
     export_parser = sub.add_parser("export", help="Export all UEM resources to disk")
     export_parser.add_argument("--env", "-e", default="default", help="Environment name (default: 'default')")
     export_parser.add_argument("--group-id", "-g", default=None,
@@ -283,6 +299,8 @@ def main():
         cmd_setup(args)
     elif args.command == "ingest":
         cmd_ingest(args)
+    elif args.command == "check":
+        cmd_check(args)
     elif args.command == "status":
         cmd_status(args)
     elif args.command == "export":

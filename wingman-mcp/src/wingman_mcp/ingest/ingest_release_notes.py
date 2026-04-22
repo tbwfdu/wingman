@@ -1,4 +1,5 @@
 """Ingest Workspace ONE UEM release notes into Chroma."""
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -53,6 +54,16 @@ def ingest_release_notes(store_dir: str, embeddings):
     vectorstore = Chroma(persist_directory=store_dir, embedding_function=embeddings)
     splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
 
+    # Track hashes of ingested release-notes text so `wingman-mcp check` can
+    # detect content changes between runs. File lives alongside the store.
+    hash_file = Path(store_dir) / ".content-hashes.txt"
+    content_hashes: dict[str, str] = {}
+    if hash_file.exists():
+        for line in hash_file.read_text().splitlines():
+            if "=" in line:
+                v, h = line.split("=", 1)
+                content_hashes[v.strip()] = h.strip()
+
     for version, url in VERSION_MAP.items():
         txt_file = _find_rn_file(version)
         if txt_file is None:
@@ -66,6 +77,7 @@ def ingest_release_notes(store_dir: str, embeddings):
             vectorstore.delete(ids=existing_ids)
 
         text = txt_file.read_text(encoding="utf-8")
+        content_hashes[version] = hashlib.sha256(text.encode()).hexdigest()
         sections = _split_by_sections(text)
 
         docs = []
@@ -87,3 +99,9 @@ def ingest_release_notes(store_dir: str, embeddings):
         if docs:
             vectorstore.add_documents(docs)
             print(f"  v{version}: {len(docs)} chunks")
+
+    # Persist content hashes for future change detection
+    if content_hashes:
+        hash_file.write_text(
+            "\n".join(f"{v}={h}" for v, h in sorted(content_hashes.items())) + "\n"
+        )
