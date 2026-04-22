@@ -143,8 +143,10 @@ def check_uem(store_dir: str) -> dict:
         for b, n in top:
             print(f"    {n:>4}  {b}")
 
-    total_live = max(len(live_urls), 1)
-    changed_frac = (len(new) + len(removed)) / total_live
+    # Normalize against the larger of live/stored so large removals don't
+    # produce misleading >100% ratios.
+    baseline = max(len(live_urls), len(stored_urls), 1)
+    changed_frac = min((len(new) + len(removed)) / baseline, 1.0)
     verdict = _verdict(changed_frac, len(new), len(removed))
     print(f"\n  Change ratio: {changed_frac:.1%}")
     print(f"  Verdict: {verdict}")

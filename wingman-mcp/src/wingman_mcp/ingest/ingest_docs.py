@@ -28,6 +28,13 @@ INCLUDE_KEYWORDS = [
 ]
 EXCLUDE_KEYWORDS = [
     "vdi", "app-volumes", "daas", "horizon",
+    # UnifiedAccessGateway / UAG is a Horizon component, not UEM. It slips
+    # through INCLUDE_KEYWORDS via "access" — exclude both name variants.
+    "accessgateway", "access-gateway",
+    # ThinApp is legacy Horizon packaging tech.
+    "thinapp",
+    # Horizon Cloud Service admin guides.
+    "-hcs-", "/hcs-", "firstgen-hcs",
     "techzone.omnissa.com/blog", "techzone.omnissa.com/users/",
     "?share=", "developer.omnissa.com", "/api/help/", "/apis/",
 ]
@@ -122,8 +129,15 @@ EXTRA_BUNDLES = [
 ]
 # Pre-compute set of lowercase bundle prefixes for fast matching.
 _EXTRA_BUNDLE_SET = {b.lower() for b in EXTRA_BUNDLES}
-# Skip versioned bundles (V23xx–V29xx) unless they are release notes.
-_VERSIONED_BUNDLE_PATTERN = re.compile(r"V2[3-9]\d{2}", re.IGNORECASE)
+# Skip versioned bundles unless they are release notes. Omnissa uses two
+# formats for archive versions:
+#   - V{yyyy}  e.g. V2209, V2410  (YYMM, no separator)
+#   - V{yy}.{m} e.g. V25.11, V23.07, V22.1  (dot-separated)
+# The unversioned / VSaaS variant is the current-version content.
+_VERSIONED_BUNDLE_PATTERN = re.compile(
+    r"V\d{4}(?!\w)|V\d{1,2}\.\d+",
+    re.IGNORECASE,
+)
 _RELEASE_NOTES_BUNDLE_PATTERN = re.compile(r"(releasenotes|release-notes|-rn|_rn)", re.IGNORECASE)
 
 
