@@ -14,6 +14,25 @@ def _keyword_tokens(text: str) -> List[str]:
     return [t for t in re.findall(r"[a-z0-9_/.-]+", (text or "").lower()) if len(t) >= 3]
 
 
+def _expand_version(v: str) -> List[str]:
+    """Expand a user-supplied version into all equivalent stored forms.
+
+    Different products store versions in different forms (Access uses
+    "24.12"; UEM/Horizon use "2412"-style). Users typically don't know
+    which form. This expands the input into a candidate set that covers
+    both, suitable for a Chroma `$in` filter.
+    """
+    v = (v or "").lower().lstrip("v").strip()
+    candidates = {v, v.replace(".", "")}
+    # 4-digit yymm input → add the dotted yy.mm form.
+    if re.fullmatch(r"\d{4}", v):
+        candidates.add(f"{v[:2]}.{v[2:]}")
+    # 5-6 digit input like '250601' → add yy.mm.patch form.
+    if re.fullmatch(r"\d{5,6}", v):
+        candidates.add(f"{v[:2]}.{v[2:4]}.{v[4:]}")
+    return sorted(candidates)
+
+
 def _metadata_text(doc: Any) -> str:
     meta = getattr(doc, "metadata", {}) or {}
     parts = [
@@ -72,6 +91,29 @@ def _format_results(docs: List[Any]) -> List[Dict[str, str]]:
             "section": meta.get("section") or meta.get("api_group") or meta.get("type", "general"),
         })
     return results
+
+
+# ---------------------------------------------------------------------------
+# Generic product documentation search (single-family stores)
+# ---------------------------------------------------------------------------
+
+def search_product_docs(
+    query: str,
+    db: Chroma,
+    search_prefix: str = "",
+    max_results: int = 10,
+) -> List[Dict[str, str]]:
+    """Search a single-product Chroma store (Horizon, App Volumes, etc.).
+
+    Compared to `search_uem`, there is no multi-family scoring — every doc
+    in the store belongs to one product, so we just vector-search, dedup,
+    and return.
+    """
+    search_query = f"{search_prefix} {query}".strip() if search_prefix else query
+    docs = db.similarity_search(search_query, k=max_results * 3)
+    filtered = [d for d in docs if not _is_boilerplate(d)]
+    deduped = _dedup(filtered)
+    return _format_results(deduped[:max_results])
 
 
 # ---------------------------------------------------------------------------
