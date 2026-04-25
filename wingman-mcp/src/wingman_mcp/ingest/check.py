@@ -18,19 +18,35 @@ from wingman_mcp.ingest.ingest_docs import (
     USER_AGENT,
     _extract_bundle,
     _get_sub_sitemaps,
+    _make_should_ingest,
     _parse_sitemap,
-    _should_ingest,
 )
 from wingman_mcp.ingest.ingest_api import API_MAP, _sanitize_url
 from wingman_mcp.ingest.ingest_release_notes import (
     VERSION_MAP,
     _find_rn_file,
 )
+from wingman_mcp.ingest.products import PRODUCTS, ProductConfig, get_product
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _split_rn_targets(targets: Iterable[str]) -> tuple[list[str], bool]:
+    """Pull RN-specific targets out of a mixed target list.
+
+    Returns (per_product_slugs, has_combined_target). If has_combined_target
+    is True, callers should ingest/check ALL products' RN.
+    """
+    targets = list(targets)
+    combined = "release_notes" in targets
+    products: list[str] = []
+    for t in targets:
+        if t.endswith("_rn"):
+            products.append(t[:-3])
+    return products, combined
+
 
 def _open_store(store_dir: str):
     """Open an existing Chroma store read-only (no embedding function needed
@@ -81,27 +97,29 @@ def _verdict(changed_frac: float, new_count: int, removed_count: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# UEM docs
+# Product docs (UEM, Horizon, App Volumes, etc.)
 # ---------------------------------------------------------------------------
 
-def check_uem(store_dir: str) -> dict:
-    """Diff Omnissa sitemap URLs against what's in the uem Chroma store."""
-    print("\n=== Checking UEM docs store ===")
+def check_product(product: ProductConfig, store_dir: str) -> dict:
+    """Diff Omnissa sitemap URLs against what's in a product's Chroma store."""
+    print(f"\n=== Checking {product.slug} docs store ({product.label}) ===")
     if not Path(store_dir, "chroma.sqlite3").exists():
         print(f"  Store not found at {store_dir} — a full ingest is required.")
-        return {"store": "uem", "status": "missing"}
+        return {"store": product.slug, "status": "missing"}
 
     print("  Discovering URLs from Omnissa sitemaps...")
     all_xmls: list[str] = []
     for sitemap in DEFAULT_SITEMAPS:
         all_xmls.extend(_get_sub_sitemaps(sitemap))
 
+    should_ingest = _make_should_ingest(product)
+
     def _fetch(xml_url):
         try:
             res = requests.get(xml_url, headers={"User-Agent": USER_AGENT}, timeout=15)
             if res.status_code != 200:
                 return []
-            return [u for u in _parse_sitemap(res.content) if _should_ingest(u)]
+            return [u for u in _parse_sitemap(res.content) if should_ingest(u)]
         except Exception:
             return []
 
@@ -125,14 +143,12 @@ def check_uem(store_dir: str) -> dict:
     print(f"  Pages no longer live:  {_fmt(len(removed))}")
     print(f"  Pages unchanged (URL): {_fmt(len(overlap))}")
 
-    # Show a sample of each
     for label, urls in (("New", new), ("Removed", removed)):
         if urls:
             print(f"\n  Sample {label} ({min(5, len(urls))} of {len(urls)}):")
             for u in sorted(urls)[:5]:
                 print(f"    + {u}" if label == "New" else f"    - {u}")
 
-    # Bundle-level summary of new pages
     if new:
         by_bundle: dict[str, int] = {}
         for u in new:
@@ -143,8 +159,6 @@ def check_uem(store_dir: str) -> dict:
         for b, n in top:
             print(f"    {n:>4}  {b}")
 
-    # Normalize against the larger of live/stored so large removals don't
-    # produce misleading >100% ratios.
     baseline = max(len(live_urls), len(stored_urls), 1)
     changed_frac = min((len(new) + len(removed)) / baseline, 1.0)
     verdict = _verdict(changed_frac, len(new), len(removed))
@@ -152,7 +166,7 @@ def check_uem(store_dir: str) -> dict:
     print(f"  Verdict: {verdict}")
 
     return {
-        "store": "uem",
+        "store": product.slug,
         "live": len(live_urls),
         "stored": len(stored_urls),
         "new": len(new),
@@ -160,6 +174,11 @@ def check_uem(store_dir: str) -> dict:
         "overlap": len(overlap),
         "verdict": verdict,
     }
+
+
+# Backward-compat alias.
+def check_uem(store_dir: str) -> dict:
+    return check_product(get_product("uem"), store_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -236,12 +255,12 @@ def check_api(store_dir: str) -> dict:
 # Release notes
 # ---------------------------------------------------------------------------
 
-def check_release_notes(store_dir: str) -> dict:
-    """Report whether release-notes files have content changes vs the store.
+def check_release_notes(store_dir: str, products: Iterable[str] | None = None) -> dict:
+    """Report RN-store drift, optionally scoped to specific products.
 
-    Uses a SHA-256 of each v{version}_rn.txt compared against a hash stored
-    alongside the store in .content-hashes.txt (written by ingest if present).
-    Falls back to 'unknown' when no hash file exists.
+    For UEM, retains the local-`.txt` content-hash check.
+    For other products, diffs sitemap-discoverable RN bundles against
+    bundle names already in the store.
     """
     print("\n=== Checking release notes store ===")
     if not Path(store_dir, "chroma.sqlite3").exists():
@@ -249,70 +268,117 @@ def check_release_notes(store_dir: str) -> dict:
         return {"store": "release_notes", "status": "missing"}
 
     vs = _open_store(store_dir)
-    stored_versions = {m.get("version") for m in _iter_metadatas(vs) if m and m.get("version")}
 
+    # Build the set of products to check.
+    if products is None:
+        targets = [s for s, c in PRODUCTS.items() if c.release_notes is not None]
+    else:
+        targets = [s for s in products if s in PRODUCTS and PRODUCTS[s].release_notes]
+
+    summary: dict[str, dict] = {}
+    overall_changed = False
+
+    for slug in targets:
+        cfg = PRODUCTS[slug]
+        rn = cfg.release_notes
+        print(f"\n--- {slug} ({cfg.label}) ---")
+        if rn.source_type == "uem_txt":
+            summary[slug] = _check_uem_txt_rn(slug, store_dir, vs)
+        else:
+            summary[slug] = _check_docs_web_rn(slug, cfg, vs)
+        if summary[slug].get("verdict", "").startswith(
+            ("significant", "minor", "version", "content")
+        ):
+            overall_changed = True
+
+    print("\n=== Release-notes summary ===")
+    for slug, r in summary.items():
+        print(f"  {slug:<18} {r.get('verdict', r.get('status', '?'))}")
+
+    return {
+        "store": "release_notes",
+        "per_product": summary,
+        "verdict": (
+            "rebuild recommended" if overall_changed else "no changes — rebuild not needed"
+        ),
+    }
+
+
+def _check_uem_txt_rn(slug: str, store_dir: str, vs) -> dict:
+    """Per-product UEM .txt content-hash check (legacy behaviour)."""
+    stored_versions = {
+        m.get("version") for m in _iter_metadatas(vs)
+        if m and m.get("product") == slug and m.get("version")
+    }
     configured = set(VERSION_MAP.keys())
     new_versions = configured - stored_versions
     removed_versions = stored_versions - configured
 
     print(f"  Configured versions: {sorted(configured)}")
     print(f"  Versions in store:   {sorted(stored_versions)}")
-    if new_versions:
-        print(f"  Missing from store:  {sorted(new_versions)}")
-    if removed_versions:
-        print(f"  Extra in store:      {sorted(removed_versions)}")
 
-    # Check local .txt files and hash them for content comparison
     hash_file = Path(store_dir) / ".content-hashes.txt"
     prior_hashes: dict[str, str] = {}
     if hash_file.exists():
         for line in hash_file.read_text().splitlines():
             if "=" in line:
-                v, h = line.split("=", 1)
-                prior_hashes[v.strip()] = h.strip()
+                k, v = line.split("=", 1)
+                prior_hashes[k.strip()] = v.strip()
 
-    print(f"\n  {'Version':<10} {'File found':<12} {'Content changed':<18}")
     changed = 0
-    any_local = False
     for version in sorted(configured):
         path = _find_rn_file(version)
         if path is None:
-            print(f"  {version:<10} {'no':<12} {'(skip)':<18}")
             continue
-        any_local = True
         text = path.read_text(encoding="utf-8", errors="ignore")
         h = hashlib.sha256(text.encode()).hexdigest()
-        prior = prior_hashes.get(version)
+        prior = prior_hashes.get(f"uem:{version}", prior_hashes.get(version))
         if prior is None:
-            status = "unknown (first run)"
-        elif prior != h:
-            status = "YES"
+            continue
+        if prior != h:
             changed += 1
-        else:
-            status = "no"
-        print(f"  {version:<10} {'yes':<12} {status:<18}")
-
-    if not any_local:
-        print("\n  No v*_rn.txt files found locally — can't compare content.")
-        print("  See INGEST_MACOS.md for where to put them.")
 
     if new_versions or removed_versions:
         verdict = "version set changed — rebuild recommended"
     elif changed:
         verdict = f"{changed} version(s) have updated content — rebuild recommended"
-    elif any_local:
-        verdict = "no changes — rebuild not needed"
     else:
-        verdict = "unable to determine — download release-notes files to compare"
-
-    print(f"\n  Verdict: {verdict}")
+        verdict = "no changes — rebuild not needed"
+    print(f"  Verdict: {verdict}")
     return {
-        "store": "release_notes",
         "configured_versions": sorted(configured),
         "stored_versions": sorted(stored_versions),
-        "missing_from_store": sorted(new_versions),
-        "extra_in_store": sorted(removed_versions),
         "content_changed": changed,
+        "verdict": verdict,
+    }
+
+
+def _check_docs_web_rn(slug: str, cfg, vs) -> dict:
+    """Diff sitemap-discoverable RN bundles vs what's in the store for this product."""
+    from wingman_mcp.ingest.ingest_release_notes import _discover_rn_urls_for, _bundle_matches
+
+    live_urls = set(_discover_rn_urls_for(cfg))
+    stored_urls = {
+        m.get("source") for m in _iter_metadatas(vs)
+        if m and m.get("product") == slug and m.get("source")
+    }
+    new = live_urls - stored_urls
+    removed = stored_urls - live_urls
+
+    print(f"  Live RN URLs:    {len(live_urls)}")
+    print(f"  Stored RN URLs:  {len(stored_urls)}")
+    print(f"  New:    {len(new)}")
+    print(f"  Removed: {len(removed)}")
+
+    baseline = max(len(live_urls), len(stored_urls), 1)
+    changed_frac = (len(new) + len(removed)) / baseline
+    verdict = _verdict(changed_frac, len(new), len(removed))
+    print(f"  Verdict: {verdict}")
+    return {
+        "live": len(live_urls),
+        "stored": len(stored_urls),
+        "new": len(new),
+        "removed": len(removed),
         "verdict": verdict,
     }
 
@@ -324,13 +390,23 @@ def check_release_notes(store_dir: str) -> dict:
 def check_all(targets: Iterable[str]) -> list[dict]:
     from wingman_mcp.config import get_store_dir
 
+    targets = list(targets)
+    rn_products, rn_combined = _split_rn_targets(targets)
     results = []
+
     if "api" in targets:
         results.append(check_api(get_store_dir("api")))
-    if "uem" in targets:
-        results.append(check_uem(get_store_dir("uem")))
-    if "release_notes" in targets:
-        results.append(check_release_notes(get_store_dir("release_notes")))
+
+    for slug, product in PRODUCTS.items():
+        if slug in targets:
+            results.append(check_product(product, get_store_dir(slug)))
+
+    if rn_combined or rn_products:
+        rn_target_products = None if rn_combined else rn_products
+        results.append(check_release_notes(
+            get_store_dir("release_notes"),
+            products=rn_target_products,
+        ))
 
     print("\n=== Summary ===")
     for r in results:
