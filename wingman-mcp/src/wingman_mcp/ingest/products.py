@@ -155,6 +155,19 @@ class ReleaseNotesSource:
 
 
 # ---------------------------------------------------------------------------
+# ApiSource
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ApiSource:
+    """Where and how to fetch a product's REST API specification."""
+    spec_url:    str
+    api_group:   str
+    spec_format: Literal["openapi_json", "openapi_yaml", "pdf"] = "openapi_json"
+    version:     Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
 # ProductConfig
 # ---------------------------------------------------------------------------
 
@@ -174,6 +187,7 @@ class ProductConfig:
     # toward the right product.  E.g. "Omnissa Horizon".
     search_prefix: str = ""
     release_notes: Optional[ReleaseNotesSource] = None
+    api: Optional[ApiSource] = None
 
     @property
     def store_key(self) -> str:
