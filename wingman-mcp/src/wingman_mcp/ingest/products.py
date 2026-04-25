@@ -367,6 +367,12 @@ PRODUCTS: dict[str, ProductConfig] = {
         release_notes=ReleaseNotesSource(
             bundle_prefixes=["Horizon-Release-Notes", "HorizonReleaseNotes"],
         ),
+        api=ApiSource(
+            spec_url="https://developer.omnissa.com/horizon-apis/horizon-server/versions/2603/rest-api-swagger-docs.json",
+            api_group="horizon-server",
+            spec_format="openapi_json",
+            version="2603",
+        ),
     ),
 
     # -----------------------------------------------------------------------
@@ -393,6 +399,11 @@ PRODUCTS: dict[str, ProductConfig] = {
         release_notes=ReleaseNotesSource(
             bundle_exact=["HorizonCloudService-next-gen-ReleaseNotes"],
             version_re=r"$nope^",  # never matches → version defaults to "rolling"
+        ),
+        api=ApiSource(
+            spec_url="https://developer.omnissa.com/horizon-apis/horizon-cloud-nextgen/horizon-cloud-nextgen-api-doc-public.yaml",
+            api_group="horizon-cloud-nextgen",
+            spec_format="openapi_yaml",
         ),
     ),
 
@@ -421,6 +432,12 @@ PRODUCTS: dict[str, ProductConfig] = {
         release_notes=ReleaseNotesSource(
             bundle_prefixes=["AppVolumesReleaseNotes"],
         ),
+        api=ApiSource(
+            spec_url="https://developer.omnissa.com/app-volumes-apis/versions/2603/swagger.json",
+            api_group="app-volumes",
+            spec_format="openapi_json",
+            version="2603",
+        ),
     ),
 
     # -----------------------------------------------------------------------
@@ -442,6 +459,11 @@ PRODUCTS: dict[str, ProductConfig] = {
         search_prefix="Omnissa Unified Access Gateway",
         release_notes=ReleaseNotesSource(
             bundle_prefixes=["UnifiedAccessGatewayReleaseNotes"],
+        ),
+        api=ApiSource(
+            spec_url="https://developer.omnissa.com/uag-rest-apis/rest-api-swagger.json",
+            api_group="uag",
+            spec_format="openapi_json",
         ),
     ),
 
@@ -521,6 +543,11 @@ PRODUCTS: dict[str, ProductConfig] = {
             # Access uses dotted yy.mm: V24.12, V23.09, etc.
             version_re=r"V?(\d{2}\.\d{2}(?:\.\d+\.\d+)?)",
         ),
+        api=ApiSource(
+            spec_url="https://developer.omnissa.com/omnissa-access-apis/openapi.json",
+            api_group="omnissa-access",
+            spec_format="openapi_json",
+        ),
     ),
 
     # -----------------------------------------------------------------------
@@ -541,6 +568,11 @@ PRODUCTS: dict[str, ProductConfig] = {
         release_notes=ReleaseNotesSource(
             bundle_exact=["IntelligenceRN"],
             version_re=r"$nope^",  # never matches → "rolling"
+        ),
+        api=ApiSource(
+            spec_url="https://developer.omnissa.com/omnissa-intelligence-apis/guides/DHUB-APIDocumentationforOmnissaIntelligence-V2-130326-183145.pdf",
+            api_group="omnissa-intelligence",
+            spec_format="pdf",
         ),
     ),
 
@@ -563,6 +595,11 @@ PRODUCTS: dict[str, ProductConfig] = {
         release_notes=ReleaseNotesSource(
             bundle_exact=["identity-services-release-notes"],
             version_re=r"$nope^",  # rolling
+        ),
+        api=ApiSource(
+            spec_url="https://developer.omnissa.com/omnissa-identity-service-api/omnissa-identity-service-api-doc.json",
+            api_group="omnissa-identity-service",
+            spec_format="openapi_json",
         ),
     ),
 }
