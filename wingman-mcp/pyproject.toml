@@ -26,6 +26,8 @@ ingest = [
     "beautifulsoup4",
     "tqdm",
     "python-dotenv",
+    "pyyaml>=6.0",
+    "pypdf>=4.0.0",
 ]
 cloud = [
     "starlette>=0.40.0",
