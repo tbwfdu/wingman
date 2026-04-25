@@ -474,6 +474,79 @@ PRODUCTS: dict[str, ProductConfig] = {
             version_re=r"_(\d{4}(?:\.\d+)?)_",
         ),
     ),
+
+    # -----------------------------------------------------------------------
+    # Workspace ONE Access (split out of the UEM ecosystem store)
+    # -----------------------------------------------------------------------
+    "access": ProductConfig(
+        slug="access",
+        label="Workspace ONE Access",
+        description="Omnissa Workspace ONE Access (formerly Identity Manager).",
+        include_keywords=[
+            "workspace-one-access", "workspaceoneaccess", "ws1-access",
+            "ws1_access", "AccessABM", "AccessEdgeDeviceSignals",
+            "AccessPlatformSSO", "WorkspaceONEAccessDesktopClient",
+        ],
+        exclude_keywords=[
+            "horizon-cloud", "app-volumes", "thinapp", "horizon-html-access",
+            "unified-access-gateway", "accessgateway", "access-gateway",
+            *_NEVER_INGEST,
+        ],
+        skip_versioned_bundles=True,
+        search_prefix="Omnissa Workspace ONE Access",
+        release_notes=ReleaseNotesSource(
+            bundle_exact=[
+                "workspace-one-access-release-notes",
+                "workspace-one-access-release-notes-fedramp",
+            ],
+            bundle_prefixes=["workspace-one-access-release-notes"],
+            # Access uses dotted yy.mm: V24.12, V23.09, etc.
+            version_re=r"V?(\d{2}\.\d{2}(?:\.\d+\.\d+)?)",
+        ),
+    ),
+
+    # -----------------------------------------------------------------------
+    # Workspace ONE Intelligence (split out of the UEM ecosystem store)
+    # -----------------------------------------------------------------------
+    "intelligence": ProductConfig(
+        slug="intelligence",
+        label="Workspace ONE Intelligence",
+        description="Omnissa Workspace ONE Intelligence — analytics & automation.",
+        include_keywords=["intelligence"],
+        exclude_keywords=[
+            "horizon", "app-volumes", "thinapp", "uem", "access",
+            *_NEVER_INGEST,
+        ],
+        extra_bundles=["Intelligence"],
+        skip_versioned_bundles=True,
+        search_prefix="Omnissa Workspace ONE Intelligence",
+        release_notes=ReleaseNotesSource(
+            bundle_exact=["IntelligenceRN"],
+            version_re=r"$nope^",  # never matches → "rolling"
+        ),
+    ),
+
+    # -----------------------------------------------------------------------
+    # Omnissa Identity Service (new — no prior store)
+    # -----------------------------------------------------------------------
+    "identity_service": ProductConfig(
+        slug="identity_service",
+        label="Omnissa Identity Service",
+        description="Omnissa Identity Service — cloud identity / authentication.",
+        include_keywords=["identityservice", "identity-service"],
+        exclude_keywords=[
+            "horizon", "app-volumes", "thinapp", "uem", "access",
+            "intelligence",
+            *_NEVER_INGEST,
+        ],
+        extra_bundles=["IdentityServices", "IdentityServiceMigration"],
+        skip_versioned_bundles=True,
+        search_prefix="Omnissa Identity Service",
+        release_notes=ReleaseNotesSource(
+            bundle_exact=["identity-services-release-notes"],
+            version_re=r"$nope^",  # rolling
+        ),
+    ),
 }
 
 

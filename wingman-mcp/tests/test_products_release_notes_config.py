@@ -69,3 +69,31 @@ def test_dem_version_re_strips_underscores():
 def test_app_volumes_rn_bundle_prefixes():
     cfg = PRODUCTS["app_volumes"]
     assert any(p.startswith("AppVolumesReleaseNotes") for p in cfg.release_notes.bundle_prefixes)
+
+
+_NEW_SLUGS = ["access", "intelligence", "identity_service"]
+
+
+@pytest.mark.parametrize("slug", _NEW_SLUGS)
+def test_new_product_registered(slug):
+    assert slug in PRODUCTS, f"{slug} missing from PRODUCTS"
+
+
+@pytest.mark.parametrize("slug", _NEW_SLUGS)
+def test_new_product_has_docs_config(slug):
+    cfg = PRODUCTS[slug]
+    assert cfg.include_keywords, f"{slug} has no include_keywords for docs ingest"
+
+
+@pytest.mark.parametrize("slug", _NEW_SLUGS)
+def test_new_product_has_release_notes(slug):
+    cfg = PRODUCTS[slug]
+    assert cfg.release_notes is not None
+    # All three are rolling/single-bundle RN.
+    assert cfg.release_notes.bundle_exact, (
+        f"{slug} should pin RN bundles via bundle_exact (single canonical bundle)"
+    )
+
+
+def test_total_product_count():
+    assert len(PRODUCTS) == 10
