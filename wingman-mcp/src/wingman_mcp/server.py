@@ -103,17 +103,29 @@ TOOLS = [
     Tool(
         name="search_api_reference",
         description=(
-            "Search Workspace ONE UEM REST API endpoint documentation. "
-            "Covers MDM, MAM, MCM, MEM, and System API groups. "
-            "Returns endpoint details: method, path, summary, parameters. "
-            "Use this when the user asks about API calls, endpoints, or programmatic access."
+            "Search Omnissa REST API endpoint documentation. "
+            "Supports product filter (default: 'uem'). Valid products: "
+            "uem, horizon, horizon_cloud, app_volumes, uag, access, "
+            "intelligence, identity_service. (DEM and ThinApp have no API.) "
+            "For UEM covers MDM/MAM/MCM/MEM/System groups; for others "
+            "returns method, path, summary, parameters from the product's "
+            "OpenAPI spec on developer.omnissa.com."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search query about UEM APIs (e.g. 'enroll device', 'GET profiles')",
+                    "description": "Search query about REST APIs (e.g. 'enroll device', 'GET profiles')",
+                },
+                "product": {
+                    "type": "string",
+                    "description": (
+                        "Product slug. Default: 'uem'. One of: uem, horizon, "
+                        "horizon_cloud, app_volumes, uag, access, intelligence, "
+                        "identity_service."
+                    ),
+                    "default": "uem",
                 },
                 "max_results": {
                     "type": "integer",
@@ -1049,6 +1061,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             results = search_api(
                 query=arguments["query"],
                 db=_get_store("api"),
+                product=arguments.get("product", "uem"),
                 max_results=arguments.get("max_results", 10),
             )
         elif name == "search_release_notes":
