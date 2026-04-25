@@ -32,6 +32,37 @@ from typing import Callable, Literal, Optional
 
 
 # ---------------------------------------------------------------------------
+# UEM release-notes section splitter (extracted from legacy ingest_release_notes.py
+# so it can be carried as a ProductConfig field).
+# ---------------------------------------------------------------------------
+
+import re as _re_rn
+
+_UEM_SECTION_HEADING_RE = _re_rn.compile(
+    r"^[A-Za-z ]+ "
+    r"(Management|Experience|Orchestrator|Architecture|Enrollment|Platform)$"
+)
+
+
+def _uem_split_by_sections(text: str) -> list[tuple[str, str]]:
+    """Split UEM release-notes text into (section_name, body) tuples."""
+    sections: list[tuple[str, str]] = []
+    current_section = "General"
+    current_content: list[str] = []
+    for line in text.split("\n"):
+        if _UEM_SECTION_HEADING_RE.match(line.strip()):
+            if current_content:
+                sections.append((current_section, "\n".join(current_content)))
+            current_section = line.strip()
+            current_content = []
+        else:
+            current_content.append(line)
+    if current_content:
+        sections.append((current_section, "\n".join(current_content)))
+    return sections
+
+
+# ---------------------------------------------------------------------------
 # Shared exclusion lists
 # ---------------------------------------------------------------------------
 
@@ -281,6 +312,11 @@ PRODUCTS: dict[str, ProductConfig] = {
         family_inference=_uem_family_inference,
         allowed_families=_UEM_ALLOWED_FAMILIES,
         search_prefix="Workspace ONE UEM",
+        release_notes=ReleaseNotesSource(
+            source_type="uem_txt",
+            version_re=r"v(\d{4})",
+            section_splitter=_uem_split_by_sections,
+        ),
     ),
 
     # -----------------------------------------------------------------------
@@ -310,6 +346,9 @@ PRODUCTS: dict[str, ProductConfig] = {
         ],
         skip_versioned_bundles=True,
         search_prefix="Omnissa Horizon",
+        release_notes=ReleaseNotesSource(
+            bundle_prefixes=["Horizon-Release-Notes", "HorizonReleaseNotes"],
+        ),
     ),
 
     # -----------------------------------------------------------------------
@@ -333,6 +372,10 @@ PRODUCTS: dict[str, ProductConfig] = {
         ],
         skip_versioned_bundles=True,
         search_prefix="Omnissa Horizon Cloud Service",
+        release_notes=ReleaseNotesSource(
+            bundle_exact=["HorizonCloudService-next-gen-ReleaseNotes"],
+            version_re=r"$nope^",  # never matches → version defaults to "rolling"
+        ),
     ),
 
     # -----------------------------------------------------------------------
@@ -357,6 +400,9 @@ PRODUCTS: dict[str, ProductConfig] = {
         ],
         skip_versioned_bundles=True,
         search_prefix="Omnissa App Volumes",
+        release_notes=ReleaseNotesSource(
+            bundle_prefixes=["AppVolumesReleaseNotes"],
+        ),
     ),
 
     # -----------------------------------------------------------------------
@@ -376,6 +422,9 @@ PRODUCTS: dict[str, ProductConfig] = {
         ],
         skip_versioned_bundles=True,
         search_prefix="Omnissa Unified Access Gateway",
+        release_notes=ReleaseNotesSource(
+            bundle_prefixes=["UnifiedAccessGatewayReleaseNotes"],
+        ),
     ),
 
     # -----------------------------------------------------------------------
@@ -396,6 +445,9 @@ PRODUCTS: dict[str, ProductConfig] = {
         ],
         skip_versioned_bundles=True,
         search_prefix="Omnissa ThinApp",
+        release_notes=ReleaseNotesSource(
+            bundle_prefixes=["ThinAppReleaseNotes"],
+        ),
     ),
 
     # -----------------------------------------------------------------------
@@ -416,6 +468,11 @@ PRODUCTS: dict[str, ProductConfig] = {
         exclude_keywords=list(_NEVER_INGEST),
         skip_versioned_bundles=True,
         search_prefix="Omnissa Dynamic Environment Manager",
+        release_notes=ReleaseNotesSource(
+            bundle_prefixes=["Dynamic-Environment-Manager"],
+            # DEM uses underscore-delimited versions in bundle names.
+            version_re=r"_(\d{4}(?:\.\d+)?)_",
+        ),
     ),
 }
 
