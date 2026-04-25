@@ -8,7 +8,9 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from wingman_mcp.config import get_store_dir, stores_exist, STORE_KEYS
-from wingman_mcp.search import search_uem, search_api, search_release_notes
+from wingman_mcp.search import (
+    search_uem, search_api, search_release_notes, search_product_docs,
+)
 
 app = Server("wingman-mcp")
 
@@ -123,12 +125,52 @@ TOOLS = [
         },
     ),
     Tool(
+        name="search_omnissa_docs",
+        description=(
+            "Search Omnissa product documentation for a specific product. "
+            "Use this for non-UEM products like Horizon, App Volumes, Unified "
+            "Access Gateway, ThinApp, Dynamic Environment Manager, Horizon "
+            "Cloud Service, Workspace ONE Access, Intelligence, and Omnissa "
+            "Identity Service. For Workspace ONE UEM (and Access/Hub/Intelligence), "
+            "prefer 'search_uem_docs' which has tuned multi-family scoring. "
+            "Run 'wingman-mcp ingest --list' on the host to see which product "
+            "stores have been built — only built stores can be searched."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "product": {
+                    "type": "string",
+                    "description": (
+                        "Product slug. One of: uem, horizon, horizon_cloud, "
+                        "app_volumes, uag, thinapp, dem, access, intelligence, "
+                        "identity_service."
+                    ),
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Natural language search query for the chosen product",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum results to return (default: 10)",
+                    "default": 10,
+                },
+            },
+            "required": ["product", "query"],
+        },
+    ),
+    Tool(
         name="search_release_notes",
         description=(
-            "Search Workspace ONE UEM release notes for feature changes, "
-            "bug fixes, resolved issues, and new capabilities across versions. "
-            "Supports version filtering (e.g. '2602', '2509', '2506'). "
-            "Use this when the user asks about what's new, version changes, or resolved issues."
+            "Search Omnissa product release notes for feature changes, "
+            "bug fixes, resolved issues, and new capabilities. "
+            "Supports product filter (default: 'uem'). Valid products: "
+            "uem, horizon, horizon_cloud, app_volumes, uag, dem, thinapp, "
+            "access, intelligence, identity_service. "
+            "Supports version filter where applicable (e.g. UEM '2602', "
+            "Horizon '2603', Access '24.12'). Version input is normalized: "
+            "'2412' and '24.12' match the same Access bundle."
         ),
         inputSchema={
             "type": "object",
@@ -137,9 +179,21 @@ TOOLS = [
                     "type": "string",
                     "description": "Search query about release notes or version changes",
                 },
+                "product": {
+                    "type": "string",
+                    "description": (
+                        "Product slug. Default: 'uem'. One of: uem, horizon, "
+                        "horizon_cloud, app_volumes, uag, dem, thinapp, access, "
+                        "intelligence, identity_service."
+                    ),
+                    "default": "uem",
+                },
                 "version": {
                     "type": "string",
-                    "description": "Optional version filter (e.g. '2602', '2509', '2506')",
+                    "description": (
+                        "Optional version filter. Examples: UEM '2602', Horizon "
+                        "'2603', Access '24.12' (or '2412' — both match)."
+                    ),
                 },
                 "max_results": {
                     "type": "integer",
@@ -977,15 +1031,15 @@ def _handle_migration(name: str, arguments: dict) -> list[TextContent]:
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     # --- RAG search tools ---
-    if name in ("search_uem_docs", "search_api_reference", "search_release_notes"):
-        if not stores_exist():
-            return [TextContent(
-                type="text",
-                text="RAG stores not found. Run 'wingman-mcp ingest' to build them, "
-                     "or 'wingman-mcp setup' to download pre-built stores.",
-            )]
-
+    if name in ("search_uem_docs", "search_api_reference", "search_release_notes",
+                "search_omnissa_docs"):
         if name == "search_uem_docs":
+            if not stores_exist():
+                return [TextContent(
+                    type="text",
+                    text="RAG stores not found. Run 'wingman-mcp ingest' to build them, "
+                         "or 'wingman-mcp setup' to download pre-built stores.",
+                )]
             results = search_uem(
                 query=arguments["query"],
                 db=_get_store("uem"),
@@ -997,13 +1051,46 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 db=_get_store("api"),
                 max_results=arguments.get("max_results", 10),
             )
-        else:
+        elif name == "search_release_notes":
             results = search_release_notes(
                 query=arguments["query"],
                 db=_get_store("release_notes"),
                 version=arguments.get("version"),
+                product=arguments.get("product", "uem"),
                 max_results=arguments.get("max_results", 15),
             )
+        else:  # search_omnissa_docs
+            from wingman_mcp.ingest.products import PRODUCTS
+            product_slug = arguments.get("product")
+            if product_slug not in PRODUCTS:
+                return [TextContent(
+                    type="text",
+                    text=f"Unknown product '{product_slug}'. Valid: {', '.join(PRODUCTS)}",
+                )]
+            from pathlib import Path
+            store_path = Path(get_store_dir(product_slug))
+            if not (store_path / "chroma.sqlite3").exists():
+                return [TextContent(
+                    type="text",
+                    text=f"Store for product '{product_slug}' has not been built. "
+                         f"Run: wingman-mcp ingest {product_slug}",
+                )]
+            cfg = PRODUCTS[product_slug]
+            # Route the UEM slug through the multi-family scorer for parity
+            # with `search_uem_docs`.
+            if product_slug == "uem":
+                results = search_uem(
+                    query=arguments["query"],
+                    db=_get_store("uem"),
+                    max_results=arguments.get("max_results", 10),
+                )
+            else:
+                results = search_product_docs(
+                    query=arguments["query"],
+                    db=_get_store(product_slug),
+                    search_prefix=cfg.search_prefix,
+                    max_results=arguments.get("max_results", 10),
+                )
 
         if not results:
             return [TextContent(type="text", text="No results found.")]
