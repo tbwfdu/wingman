@@ -178,6 +178,29 @@ wingman-mcp status
 
 You should see all three stores listed with their sizes.
 
+### Stores
+
+Each Omnissa product has its own documentation store; release notes and
+API references live in two combined stores keyed by `product` metadata.
+
+| Store | Slug(s) | What's in it |
+|---|---|---|
+| Workspace ONE UEM docs | `uem` | UEM admin guides, configuration, profiles, Hub |
+| Horizon docs | `horizon` | Horizon 8 / Enterprise on-prem VDI |
+| Horizon Cloud docs | `horizon_cloud` | Horizon Cloud Service / DaaS |
+| App Volumes docs | `app_volumes` | App Volumes admin & deployment |
+| UAG docs | `uag` | Unified Access Gateway |
+| DEM docs | `dem` | Dynamic Environment Manager |
+| ThinApp docs | `thinapp` | ThinApp packaging |
+| Access docs | `access` | Workspace ONE Access (split out of UEM) |
+| Intelligence docs | `intelligence` | Workspace ONE Intelligence (split out of UEM) |
+| Identity Service docs | `identity_service` | Omnissa Identity Service |
+| Release notes | `release_notes` (or `<slug>_rn`) | All products' release notes, filterable |
+| API references | `api` (or `<slug>_api`) | UEM REST API; non-UEM products coming in Plan 2 |
+
+Build all of them with `wingman-mcp ingest`. Build only one product's
+release notes with e.g. `wingman-mcp ingest horizon_rn`.
+
 ## Client configuration
 
 The server uses **stdio** transport, which is supported by all MCP-compatible clients. The command to start the server is:

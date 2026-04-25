@@ -1,5 +1,22 @@
 # Refreshing RAG Stores on macOS
 
+## Per-product release notes
+
+The `v{version}_rn.txt` workflow described below is **UEM-only**. Release
+notes for all other products (Horizon, App Volumes, UAG, DEM, ThinApp,
+Access, Intelligence, Identity Service) are scraped automatically from
+`docs.omnissa.com` — no local files needed.
+
+To rebuild just one product's release notes:
+
+    wingman-mcp ingest horizon_rn
+
+To rebuild all products' release notes:
+
+    wingman-mcp ingest rn
+
+---
+
 This guide walks through an **incremental refresh** of the Chroma vector stores on a macOS machine, then syncing the updated stores to Azure Files so the hosted wingman-mcp container serves fresh data.
 
 Embeddings are generated locally using [sentence-transformers](https://www.sbert.net/) with the `all-MiniLM-L6-v2` model (≈90 MB, CPU-only). **No Azure OpenAI / external embedding service is used.**
