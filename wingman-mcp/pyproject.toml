@@ -31,6 +31,9 @@ cloud = [
     "starlette>=0.40.0",
     "uvicorn>=0.30.0",
 ]
+dev = [
+    "pytest>=8.0.0",
+]
 
 [project.scripts]
 wingman-mcp = "wingman_mcp.cli:main"
@@ -40,3 +43,8 @@ packages = ["src/wingman_mcp"]
 exclude = [
   "src/wingman_mcp/ingest",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
