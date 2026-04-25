@@ -288,10 +288,11 @@ PRODUCTS: dict[str, ProductConfig] = {
     # -----------------------------------------------------------------------
     "uem": ProductConfig(
         slug="uem",
-        label="Workspace ONE UEM (UEM, Access, Hub, Intelligence)",
+        label="Workspace ONE UEM (UEM, Hub)",
         description=(
-            "Workspace ONE UEM, Access, Intelligent Hub, and Intelligence — "
-            "plus the WS1-managed apps (Tunnel, Assist, Boxer, Launcher, etc.)."
+            "Workspace ONE UEM and Intelligent Hub — "
+            "plus the WS1-managed apps (Tunnel, Assist, Boxer, Launcher, etc.). "
+            "Access and Intelligence are now separate products with their own stores."
         ),
         include_keywords=[
             "workspace-one", "uem", "access", "intelligence", "hub",
