@@ -239,42 +239,68 @@ def search_release_notes(
     query: str,
     db: Chroma,
     version: Optional[str] = None,
+    product: str = "uem",
     max_results: int = 15,
 ) -> List[Dict[str, str]]:
-    """Search the release notes store with optional version filter."""
+    """Search the combined release-notes store, scoped to one product.
+
+    Defaults to product='uem' so existing callers keep working unchanged.
+    Component-focused multi-pass search (Windows / macOS / etc.) only fires
+    for UEM, since those headings are UEM-specific.
+    """
+    from wingman_mcp.ingest.products import PRODUCTS
+
+    if product not in PRODUCTS:
+        return [{
+            "content": f"Unknown product '{product}'. Valid: {', '.join(sorted(PRODUCTS))}",
+            "source_url": "",
+            "source": "wingman-mcp",
+            "section": "error",
+        }]
+
+    cfg = PRODUCTS[product]
+    search_prefix = cfg.search_prefix or cfg.label
     docs: List[Any] = []
 
-    # Normalize version input
+    # Build version filter (with normalization expansion).
+    version_clause = None
     if version:
-        version = version.replace("v", "").strip()
+        version_clause = {"version": {"$in": _expand_version(version)}}
 
-    # Version-specific search
-    if version:
-        v_filter = {"$and": [{"version": version}, {"type": "release_notes"}]}
-        docs.extend(db.similarity_search(query, k=max_results, filter=v_filter))
+    base_filter: Dict[str, Any] = {
+        "$and": [
+            {"product": product},
+            {"type": "release_notes"},
+        ],
+    }
+    if version_clause:
+        base_filter["$and"].append(version_clause)
 
-        # Component-focused searches for richer results
+    # Primary search.
+    docs.extend(db.similarity_search(query, k=max_results * 2, filter=base_filter))
+
+    # UEM-only: component-focused multi-pass (preserves existing behaviour).
+    if product == "uem" and version:
         for label in COMPONENT_LABELS.values():
-            focus_query = f"Workspace ONE UEM {label} updates release notes"
-            docs.extend(db.similarity_search(focus_query, k=5, filter=v_filter))
-    else:
-        # Search across all versions
-        docs.extend(db.similarity_search(query, k=max_results * 2, filter={"type": "release_notes"}))
+            focus_query = f"{search_prefix} {label} updates release notes"
+            docs.extend(db.similarity_search(focus_query, k=5, filter=base_filter))
 
     filtered = [d for d in docs if not _is_boilerplate(d)]
     deduped = _dedup(filtered)
 
-    # Score: prefer matching version, recency
+    # Score: prefer matching version, then recency.
+    expanded_versions = set(_expand_version(version)) if version else set()
+
     def score(doc):
         meta = getattr(doc, "metadata", {}) or {}
         s = 0
-        if version and meta.get("version") == version:
-            s += 50
-        # Newer versions score higher
         v = meta.get("version", "")
-        if v:
+        if version and v in expanded_versions:
+            s += 50
+        # Numeric-version recency boost (only meaningful for yymm-style).
+        if v and v != "rolling":
             try:
-                s += int(v)  # e.g. 2602 > 2509 > 2506
+                s += int(v.replace(".", ""))
             except ValueError:
                 pass
         return s
