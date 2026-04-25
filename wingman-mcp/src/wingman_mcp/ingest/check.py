@@ -185,20 +185,56 @@ def check_uem(store_dir: str) -> dict:
 # API reference
 # ---------------------------------------------------------------------------
 
-def check_api(store_dir: str) -> dict:
-    """Diff live Swagger endpoints against what's in the api Chroma store."""
+def check_api(store_dir: str, products: Iterable[str] | None = None) -> dict:
+    """Diff live API specs against what's stored, scoped to specific products."""
     print("\n=== Checking API reference store ===")
     if not Path(store_dir, "chroma.sqlite3").exists():
         print(f"  Store not found at {store_dir} — a full ingest is required.")
         return {"store": "api", "status": "missing"}
 
-    # Fetch live endpoint signatures per group
-    live_sigs: dict[str, set[tuple[str, str]]] = {}  # group -> {(METHOD, path)}
+    if products is None:
+        targets = ["uem"] + [s for s, c in PRODUCTS.items() if c.api is not None]
+    else:
+        targets = list(products)
+
+    summary: dict[str, dict] = {}
+    overall_changed = False
+
+    if "uem" in targets:
+        summary["uem"] = _check_uem_api(store_dir)
+        targets.remove("uem")
+
+    for slug in targets:
+        cfg = PRODUCTS.get(slug)
+        if cfg is None or cfg.api is None:
+            continue
+        summary[slug] = _check_product_api(slug, cfg, store_dir)
+
+    for r in summary.values():
+        v = r.get("verdict") or ""
+        if v.startswith(("significant", "minor", "version")):
+            overall_changed = True
+
+    print("\n=== API summary ===")
+    for slug, r in summary.items():
+        print(f"  {slug:<18} {r.get('verdict', r.get('status', '?'))}")
+
+    return {
+        "store": "api",
+        "per_product": summary,
+        "verdict": (
+            "rebuild recommended" if overall_changed else "no changes — rebuild not needed"
+        ),
+    }
+
+
+def _check_uem_api(store_dir: str) -> dict:
+    """Original UEM-only API check (preserved verbatim)."""
+    live_sigs: dict[str, set[tuple[str, str]]] = {}
     for name, url in API_MAP.items():
         try:
             res = requests.get(url, timeout=20)
             if res.status_code != 200:
-                print(f"  {name}: live fetch failed ({res.status_code})")
                 live_sigs[name] = set()
                 continue
             data = res.json()
@@ -207,14 +243,13 @@ def check_api(store_dir: str) -> dict:
                 for method in methods.keys():
                     sigs.add((method.upper(), path))
             live_sigs[name] = sigs
-        except Exception as e:
-            print(f"  {name}: live fetch error: {e}")
+        except Exception:
             live_sigs[name] = set()
 
     vs = _open_store(store_dir)
     stored_sigs: dict[str, set[tuple[str, str]]] = {}
     for m in _iter_metadatas(vs):
-        if not m:
+        if not m or m.get("product") != "uem":
             continue
         g = m.get("api_group")
         method = m.get("method")
@@ -222,8 +257,8 @@ def check_api(store_dir: str) -> dict:
         if g and method and path:
             stored_sigs.setdefault(g, set()).add((method, path))
 
-    print(f"  {'Group':<15} {'Live':>6} {'Stored':>7} {'+New':>6} {'-Rem':>6}")
     total_new = total_removed = total_live = 0
+    print(f"  UEM groups:")
     for group in sorted(set(live_sigs) | set(stored_sigs)):
         live = live_sigs.get(group, set())
         stored = stored_sigs.get(group, set())
@@ -232,21 +267,65 @@ def check_api(store_dir: str) -> dict:
         total_new += new
         total_removed += removed
         total_live += len(live)
-        print(f"  {group:<15} {len(live):>6} {len(stored):>7} {new:>6} {removed:>6}")
+        print(f"    {group:<15} live={len(live):>4} stored={len(stored):>4} +{new} -{removed}")
 
     changed_frac = (total_new + total_removed) / max(total_live, 1)
     verdict = _verdict(changed_frac, total_new, total_removed)
-    print(f"\n  Total live endpoints: {_fmt(total_live)}")
-    print(f"  New endpoints:        {_fmt(total_new)}")
-    print(f"  Removed endpoints:    {_fmt(total_removed)}")
-    print(f"  Change ratio:         {changed_frac:.1%}")
     print(f"  Verdict: {verdict}")
+    return {"live": total_live, "new": total_new, "removed": total_removed, "verdict": verdict}
 
+
+def _check_product_api(slug: str, cfg, store_dir: str) -> dict:
+    """Diff a non-UEM product's live spec against its stored chunks."""
+    from wingman_mcp.ingest.ingest_api import _fetch_spec
+    print(f"  {slug} ({cfg.api.api_group})")
+
+    if cfg.api.spec_format == "pdf":
+        # Without re-downloading and re-extracting, we can only count stored chunks.
+        vs = _open_store(store_dir)
+        stored = sum(
+            1 for m in _iter_metadatas(vs)
+            if m and m.get("product") == slug and m.get("type") == "api_documentation"
+        )
+        verdict = "PDF — manual refresh recommended periodically"
+        print(f"    stored chunks: {stored}; verdict: {verdict}")
+        return {"stored": stored, "verdict": verdict}
+
+    try:
+        spec = _fetch_spec(cfg.api.spec_url, cfg.api.spec_format)
+    except Exception as e:
+        print(f"    fetch failed: {e}")
+        return {"verdict": f"fetch failed: {e}"}
+
+    live_sigs = set()
+    for path, methods in (spec.get("paths") or {}).items():
+        if isinstance(methods, dict):
+            for method in methods.keys():
+                if method.lower() in {
+                    "get", "post", "put", "delete", "patch", "head", "options", "trace",
+                }:
+                    live_sigs.add((method.upper(), path))
+
+    vs = _open_store(store_dir)
+    stored_sigs = {
+        (m.get("method"), m.get("path"))
+        for m in _iter_metadatas(vs)
+        if m and m.get("product") == slug and m.get("type") == "api_endpoint"
+        and m.get("method") and m.get("path")
+    }
+
+    new = live_sigs - stored_sigs
+    removed = stored_sigs - live_sigs
+    print(f"    live={len(live_sigs)} stored={len(stored_sigs)} +{len(new)} -{len(removed)}")
+
+    changed_frac = (len(new) + len(removed)) / max(len(live_sigs), 1)
+    verdict = _verdict(changed_frac, len(new), len(removed))
+    print(f"    verdict: {verdict}")
     return {
-        "store": "api",
-        "live": total_live,
-        "new": total_new,
-        "removed": total_removed,
+        "live": len(live_sigs),
+        "stored": len(stored_sigs),
+        "new": len(new),
+        "removed": len(removed),
         "verdict": verdict,
     }
 
@@ -392,10 +471,13 @@ def check_all(targets: Iterable[str]) -> list[dict]:
 
     targets = list(targets)
     rn_products, rn_combined = _split_rn_targets(targets)
+    api_products = [t[:-4] for t in targets if t.endswith("_api")]
+    api_combined = "api" in targets
     results = []
 
-    if "api" in targets:
-        results.append(check_api(get_store_dir("api")))
+    if api_combined or api_products:
+        api_target_products = None if api_combined else api_products
+        results.append(check_api(get_store_dir("api"), products=api_target_products))
 
     for slug, product in PRODUCTS.items():
         if slug in targets:
