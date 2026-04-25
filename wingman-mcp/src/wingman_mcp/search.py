@@ -152,22 +152,58 @@ def search_uem(query: str, db: Chroma, max_results: int = 10) -> List[Dict[str, 
 # API Reference Search
 # ---------------------------------------------------------------------------
 
-def search_api(query: str, db: Chroma, max_results: int = 10) -> List[Dict[str, str]]:
-    """Search the API endpoint reference store."""
-    search_query = f"Workspace ONE UEM API {query}".strip()
+def search_api(
+    query: str,
+    db: Chroma,
+    product: str = "uem",
+    max_results: int = 10,
+) -> List[Dict[str, str]]:
+    """Search the API endpoint reference store, scoped to one product.
 
-    # Vector search
-    docs = db.similarity_search(search_query, k=max_results * 2, filter={"type": "api_endpoint"})
+    Defaults to product='uem' so existing callers keep working unchanged.
+    """
+    from wingman_mcp.ingest.products import PRODUCTS
 
-    # Lexical fallback if vector search returns nothing
+    if product not in PRODUCTS:
+        return [{
+            "content": f"Unknown product '{product}'. Valid: {', '.join(sorted(PRODUCTS))}",
+            "source_url": "",
+            "source": "wingman-mcp",
+            "section": "error",
+        }]
+
+    cfg = PRODUCTS[product]
+    if product != "uem" and cfg.api is None:
+        return [{
+            "content": (
+                f"{cfg.label} does not have a REST API. "
+                f"Try search_omnissa_docs(product='{product}') for product documentation."
+            ),
+            "source_url": "",
+            "source": "wingman-mcp",
+            "section": "no_api",
+        }]
+
+    search_prefix = cfg.search_prefix or cfg.label
+    search_query = f"{search_prefix} API {query}".strip()
+
+    base_filter = {"$and": [
+        {"product": product},
+        {"type": "api_endpoint"},
+    ]}
+    docs = db.similarity_search(search_query, k=max_results * 2, filter=base_filter)
+
     if not docs:
-        docs = _lexical_api_fallback(db, query, limit=max_results)
+        docs = _lexical_api_fallback(db, query, product=product, limit=max_results)
 
-    # Also get context docs
+    # Pull in api_documentation context (Intelligence's PDF chunks live here).
     context_docs = []
     for doc_type in ("api_documentation", "api_definition"):
         try:
-            context_docs.extend(db.similarity_search(search_query, k=6, filter={"type": doc_type}))
+            context_docs.extend(db.similarity_search(
+                search_query, k=6,
+                filter={"$and": [{"product": product}, {"type": doc_type}]},
+            ))
         except Exception:
             pass
 
@@ -175,7 +211,6 @@ def search_api(query: str, db: Chroma, max_results: int = 10) -> List[Dict[str, 
     filtered = [d for d in combined if not _is_boilerplate(d)]
     deduped = _dedup(filtered)
 
-    # Score: prefer api_endpoint type
     def score(doc):
         meta = getattr(doc, "metadata", {}) or {}
         s = 0
@@ -189,13 +224,21 @@ def search_api(query: str, db: Chroma, max_results: int = 10) -> List[Dict[str, 
     return _format_results(deduped[:max_results])
 
 
-def _lexical_api_fallback(db: Chroma, query: str, limit: int = 8) -> List[Any]:
+def _lexical_api_fallback(
+    db: Chroma,
+    query: str,
+    product: str = "uem",
+    limit: int = 8,
+) -> List[Any]:
     token_set = set(_keyword_tokens(query))
     if not token_set:
         return []
 
     try:
-        payload = db.get(where={"type": "api_endpoint"})
+        payload = db.get(where={"$and": [
+            {"product": product},
+            {"type": "api_endpoint"},
+        ]})
     except Exception:
         return []
 
