@@ -341,7 +341,7 @@ def _check_uem_txt_rn(slug: str, store_dir: str, vs) -> dict:
     if new_versions or removed_versions:
         verdict = "version set changed — rebuild recommended"
     elif changed:
-        verdict = f"{changed} version(s) have updated content — rebuild recommended"
+        verdict = f"content updated in {changed} version(s) — rebuild recommended"
     else:
         verdict = "no changes — rebuild not needed"
     print(f"  Verdict: {verdict}")
@@ -355,7 +355,7 @@ def _check_uem_txt_rn(slug: str, store_dir: str, vs) -> dict:
 
 def _check_docs_web_rn(slug: str, cfg, vs) -> dict:
     """Diff sitemap-discoverable RN bundles vs what's in the store for this product."""
-    from wingman_mcp.ingest.ingest_release_notes import _discover_rn_urls_for, _bundle_matches
+    from wingman_mcp.ingest.ingest_release_notes import _discover_rn_urls_for
 
     live_urls = set(_discover_rn_urls_for(cfg))
     stored_urls = {
