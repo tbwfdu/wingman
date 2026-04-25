@@ -57,7 +57,11 @@ def cmd_ingest(args):
     product_slugs = list_product_slugs()
     valid_keys = set(get_store_keys())
     aliases = {
-        "all": list(valid_keys) + [f"{s}_rn" for s in product_slugs],
+        "all": (
+            list(valid_keys)
+            + [f"{s}_rn" for s in product_slugs]
+            + [f"{s}_api" for s in product_slugs if PRODUCTS[s].api is not None]
+        ),
         "docs": product_slugs,
         "rn": [f"{s}_rn" for s in product_slugs if PRODUCTS[s].release_notes is not None],
     }
@@ -65,6 +69,7 @@ def cmd_ingest(args):
     raw_targets = args.stores or ["all"]
     docs_targets: list[str] = []
     rn_targets: list[str] = []
+    api_targets: list[str] = []
     other_targets: list[str] = []
     seen: set[str] = set()
 
@@ -80,6 +85,15 @@ def cmd_ingest(args):
                     print(f"Error: unknown product in '{k}'.")
                     sys.exit(1)
                 rn_targets.append(slug)
+            elif k.endswith("_api"):
+                slug = k[:-4]
+                if slug not in product_slugs:
+                    print(f"Error: unknown product in '{k}'.")
+                    sys.exit(1)
+                if PRODUCTS[slug].api is None and slug != "uem":
+                    print(f"Error: {slug} has no REST API; '{k}' is not valid.")
+                    sys.exit(1)
+                api_targets.append(slug)
             elif k in valid_keys:
                 if k in product_slugs:
                     docs_targets.append(k)
@@ -104,11 +118,22 @@ def cmd_ingest(args):
                 batch_size=args.batch_size,
             )
 
-    # Phase 2: API reference (single combined store)
+    # Phase 2: API reference (single combined store, multi-product)
     if "api" in other_targets:
-        print("\n--- Ingesting API reference (UEM only in this plan) ---")
-        from wingman_mcp.ingest.ingest_api import ingest_api
-        ingest_api(store_dir=get_store_dir("api"), embeddings=embeddings)
+        api_targets = ["uem"] + [s for s in product_slugs if PRODUCTS[s].api is not None]
+
+    if api_targets:
+        print(f"\n--- Ingesting API reference for: {', '.join(api_targets)} ---")
+        from wingman_mcp.ingest.ingest_api import ingest_api, ingest_api_for_product
+        for slug in api_targets:
+            if slug == "uem":
+                ingest_api(store_dir=get_store_dir("api"), embeddings=embeddings)
+            else:
+                ingest_api_for_product(
+                    slug=slug,
+                    store_dir=get_store_dir("api"),
+                    embeddings=embeddings,
+                )
 
     # Phase 3: release notes (combined store, per-product targets)
     if "release_notes" in other_targets:
@@ -140,7 +165,11 @@ def cmd_check(args):
     product_slugs = list_product_slugs()
     valid_keys = set(get_store_keys())
     aliases = {
-        "all": list(valid_keys) + [f"{s}_rn" for s in product_slugs],
+        "all": (
+            list(valid_keys)
+            + [f"{s}_rn" for s in product_slugs]
+            + [f"{s}_api" for s in product_slugs if PRODUCTS[s].api is not None]
+        ),
         "docs": product_slugs,
         "rn": [f"{s}_rn" for s in product_slugs if PRODUCTS[s].release_notes is not None],
     }
@@ -158,6 +187,15 @@ def cmd_check(args):
                 slug = k[:-3]
                 if slug not in product_slugs:
                     print(f"Error: unknown product in '{k}'.")
+                    sys.exit(1)
+                targets.append(k)
+            elif k.endswith("_api"):
+                slug = k[:-4]
+                if slug not in product_slugs:
+                    print(f"Error: unknown product in '{k}'.")
+                    sys.exit(1)
+                if PRODUCTS[slug].api is None and slug != "uem":
+                    print(f"Error: {slug} has no REST API; '{k}' is not valid.")
                     sys.exit(1)
                 targets.append(k)
             elif k in valid_keys:
