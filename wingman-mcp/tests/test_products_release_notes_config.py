@@ -97,3 +97,24 @@ def test_new_product_has_release_notes(slug):
 
 def test_total_product_count():
     assert len(PRODUCTS) == 10
+
+
+def test_uem_family_allowlist_excludes_access_and_intelligence():
+    cfg = PRODUCTS["uem"]
+    assert cfg.allowed_families == {"uem", "hub"}, (
+        "Access and Intelligence should no longer be merged into the UEM store"
+    )
+
+
+def test_uem_family_inference_still_classifies_access_pages():
+    """Inference should still recognise an Access page; the change is that
+    those pages now get filtered OUT at download time because 'access' is
+    no longer in allowed_families."""
+    cfg = PRODUCTS["uem"]
+    # Topic payload with "workspace one access" in bundle title triggers inference
+    family = cfg.family_inference(
+        "https://docs.omnissa.com/bundle/AccessAdminGuideVSaaS/page/x.html",
+        {"bundle_title": "Workspace ONE Access Administration Guide VSaaS"},
+    )
+    assert family == "access"
+    assert family not in cfg.allowed_families

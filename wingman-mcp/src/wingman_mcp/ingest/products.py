@@ -81,7 +81,7 @@ _NEVER_INGEST = [
 # Family inference for the broad UEM ecosystem store
 # ---------------------------------------------------------------------------
 
-_UEM_ALLOWED_FAMILIES = {"uem", "access", "hub", "intelligence"}
+_UEM_ALLOWED_FAMILIES = {"uem", "hub"}
 
 
 def _uem_extract_bundle(url: str) -> Optional[str]:
@@ -305,6 +305,9 @@ PRODUCTS: dict[str, ProductConfig] = {
             "thinapp",
             # Horizon Cloud Service
             "-hcs-", "/hcs-", "firstgen-hcs",
+            # Access and Intelligence split out to separate stores
+            "workspace-one-access", "workspaceoneaccess", "ws1-access",
+            "ws1_access", "intelligence",
             *_NEVER_INGEST,
         ],
         extra_bundles=_UEM_EXTRA_BUNDLES,
