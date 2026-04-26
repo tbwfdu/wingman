@@ -1275,6 +1275,128 @@ TOOLS = [
             "required": ["user_resource"],
         },
     ),
+    # -----------------------------------------------------------------------
+    # Workspace ONE Access API tools
+    # (require auth via 'wingman-mcp auth set --product access')
+    # -----------------------------------------------------------------------
+    Tool(
+        name="access_search_users",
+        description=(
+            "Search SCIM users in a Workspace ONE Access tenant. Supports SCIM "
+            "filter, startIndex/count paging, sortBy/sortOrder, attributes."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "filter": {"type": "string"},
+                "sortBy": {"type": "string"},
+                "sortOrder": {"type": "string"},
+                "startIndex": {"type": "integer"},
+                "count": {"type": "integer"},
+                "attributes": {"type": "string"},
+                "customSchemaExtensionTypes": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="access_get_user",
+        description="Get a SCIM user by ID from a Workspace ONE Access tenant.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string"},
+                "attributes": {"type": "string"},
+                "directoryUuid": {"type": "string"},
+            },
+            "required": ["user_id"],
+        },
+    ),
+    Tool(
+        name="access_search_groups",
+        description="Search SCIM groups in a Workspace ONE Access tenant.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "filter": {"type": "string"},
+                "sortBy": {"type": "string"},
+                "sortOrder": {"type": "string"},
+                "startIndex": {"type": "integer"},
+                "count": {"type": "integer"},
+                "attributes": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="access_get_group",
+        description="Get a SCIM group by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "group_id": {"type": "string"},
+                "attributes": {"type": "string"},
+            },
+            "required": ["group_id"],
+        },
+    ),
+    Tool(
+        name="access_search_entitlements",
+        description=(
+            "Search entitlements (catalog items) in a Workspace ONE Access tenant. "
+            "Pass userId to scope to one user, or omit for the authenticated client. "
+            "criteria is a SearchCriteria body (pass {} for unrestricted)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "userId": {"type": "string"},
+                "showVisibleAppsOnly": {"type": "boolean"},
+                "startIndex": {"type": "integer"},
+                "pageSize": {"type": "integer"},
+                "criteria": {
+                    "type": "object",
+                    "description": "SearchCriteria body. Pass {} for 'no filter'.",
+                },
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="access_get_activity_summary_report",
+        description=(
+            "Get the activity summary report for a time interval. "
+            "interval values are tenant-version-specific (e.g. 'day', 'week', "
+            "'month'); use search_api_reference --product access if unsure."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "interval": {"type": "string"},
+            },
+            "required": ["interval"],
+        },
+    ),
+    Tool(
+        name="access_create_user",
+        description=(
+            "Create a local user in a Workspace ONE Access tenant (mutation). "
+            "user_resource follows the SdkUserResource schema. sendMail=true "
+            "triggers a password-setup email."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "user_resource": {
+                    "type": "object",
+                    "description": "Full SCIM/SDK user resource.",
+                },
+                "sendMail": {"type": "boolean"},
+                "attributes": {"type": "string"},
+            },
+            "required": ["user_resource"],
+        },
+    ),
 ]
 
 # Inject 'env' parameter into all UEM API tool schemas (except uem_list_environments)
@@ -1291,7 +1413,8 @@ _SKIP_ENV_INJECTION = {"uem_list_environments", "uem_migrate_scripts",
                        "uem_migrate_sensors", "uem_migrate_profiles",
                        "uem_migrate_apps"}
 # Tool-name prefixes that get the per-product `env` parameter injected.
-_PRODUCT_TOOL_PREFIXES = ("uem_", "app_volumes_", "horizon_", "identity_service_")
+_PRODUCT_TOOL_PREFIXES = ("uem_", "app_volumes_", "horizon_", "identity_service_",
+                           "access_")
 for _tool in TOOLS:
     if (any(_tool.name.startswith(p) for p in _PRODUCT_TOOL_PREFIXES)
             and _tool.name not in _SKIP_ENV_INJECTION):
@@ -1367,6 +1490,14 @@ def _build_product_client(product: str, env_name: str):
             client_secret=creds["client_secret"],
             token_url=creds.get("token_url") or None,
         )
+    if product == "access":
+        from wingman_mcp.access_api import AccessClient
+        return AccessClient(
+            tenant_url=creds["tenant_url"],
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+            token_url=creds.get("token_url") or None,
+        )
     raise RuntimeError(f"No client implementation registered for product '{product}'.")
 
 
@@ -1382,6 +1513,7 @@ def _register_product_api_tools() -> None:
     from wingman_mcp import app_volumes_api as av
     from wingman_mcp import horizon_api as hz
     from wingman_mcp import identity_service_api as ids
+    from wingman_mcp import access_api as acc
 
     _PRODUCT_API_TOOLS.update({
         # App Volumes
@@ -1411,6 +1543,14 @@ def _register_product_api_tools() -> None:
         "identity_service_search_directories": ("identity_service", ids.search_directories, None),
         "identity_service_get_directory":      ("identity_service", ids.get_directory, ["directory_id"]),
         "identity_service_create_user":        ("identity_service", ids.create_user, ["user_resource"]),
+        # Workspace ONE Access
+        "access_search_users":                  ("access", acc.search_users, None),
+        "access_get_user":                      ("access", acc.get_user, ["user_id"]),
+        "access_search_groups":                 ("access", acc.search_groups, None),
+        "access_get_group":                     ("access", acc.get_group, ["group_id"]),
+        "access_search_entitlements":           ("access", acc.search_entitlements, None),
+        "access_get_activity_summary_report":   ("access", acc.get_activity_summary_report, ["interval"]),
+        "access_create_user":                   ("access", acc.create_user, ["user_resource"]),
     })
 
 
