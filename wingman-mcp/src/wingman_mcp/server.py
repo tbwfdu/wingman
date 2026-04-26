@@ -1017,6 +1017,163 @@ TOOLS = [
             "required": ["writable_ids", "size_mb"],
         },
     ),
+    # -----------------------------------------------------------------------
+    # Horizon API tools (require auth via 'wingman-mcp auth set --product horizon')
+    # -----------------------------------------------------------------------
+    Tool(
+        name="horizon_search_desktop_pools",
+        description=(
+            "List Desktop Pools in a Horizon environment. Supports paging "
+            "(page, size) and server-side filter/sort_by/order_by. "
+            "Requires Horizon credentials configured via "
+            "'wingman-mcp auth set --product horizon'."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer", "description": "Page size"},
+                "filter": {"type": "string", "description": "Horizon filter expression (JSON)"},
+                "sort_by": {"type": "string"},
+                "order_by": {"type": "string", "description": "ASCENDING or DESCENDING"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_get_desktop_pool",
+        description="Get full details of a Horizon Desktop Pool by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {"pool_id": {"type": "string"}},
+            "required": ["pool_id"],
+        },
+    ),
+    Tool(
+        name="horizon_search_farms",
+        description=(
+            "List Farms (RDSH) in a Horizon environment. "
+            "Supports page/size/filter/sort_by/order_by."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "filter": {"type": "string"},
+                "sort_by": {"type": "string"},
+                "order_by": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_get_farm",
+        description="Get full details of a Horizon Farm by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {"farm_id": {"type": "string"}},
+            "required": ["farm_id"],
+        },
+    ),
+    Tool(
+        name="horizon_search_machines",
+        description=(
+            "List Machines (VMs) in a Horizon environment. "
+            "Supports page/size/filter/sort_by/order_by."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "filter": {"type": "string"},
+                "sort_by": {"type": "string"},
+                "order_by": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_get_machine",
+        description="Get full details of a Horizon Machine (VM) by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {"machine_id": {"type": "string"}},
+            "required": ["machine_id"],
+        },
+    ),
+    Tool(
+        name="horizon_search_sessions",
+        description=(
+            "List active and disconnected user Sessions in a Horizon environment "
+            "(uses the v8 endpoint — latest schema). "
+            "Supports page/size/filter/sort_by/order_by."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "filter": {"type": "string"},
+                "sort_by": {"type": "string"},
+                "order_by": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_get_session",
+        description="Get full details of a Horizon Session by ID (v8).",
+        inputSchema={
+            "type": "object",
+            "properties": {"session_id": {"type": "string"}},
+            "required": ["session_id"],
+        },
+    ),
+    Tool(
+        name="horizon_disconnect_sessions",
+        description=(
+            "Disconnect one or more locally-resourced user sessions (mutation). "
+            "Disconnect leaves applications running so users can resume — for a "
+            "full sign-out, use the Horizon admin console."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Session IDs to disconnect",
+                },
+            },
+            "required": ["session_ids"],
+        },
+    ),
+    Tool(
+        name="horizon_restart_machines",
+        description=(
+            "Restart (reboot) one or more Horizon machines (mutation). "
+            "By default the action is rejected if any machine has open "
+            "sessions; pass force_operation=true to restart anyway."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "machine_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Machine IDs to restart",
+                },
+                "force_operation": {
+                    "type": "boolean",
+                    "description": "Force restart even with active sessions",
+                    "default": False,
+                },
+            },
+            "required": ["machine_ids"],
+        },
+    ),
 ]
 
 # Inject 'env' parameter into all UEM API tool schemas (except uem_list_environments)
@@ -1033,7 +1190,7 @@ _SKIP_ENV_INJECTION = {"uem_list_environments", "uem_migrate_scripts",
                        "uem_migrate_sensors", "uem_migrate_profiles",
                        "uem_migrate_apps"}
 # Tool-name prefixes that get the per-product `env` parameter injected.
-_PRODUCT_TOOL_PREFIXES = ("uem_", "app_volumes_")
+_PRODUCT_TOOL_PREFIXES = ("uem_", "app_volumes_", "horizon_")
 for _tool in TOOLS:
     if (any(_tool.name.startswith(p) for p in _PRODUCT_TOOL_PREFIXES)
             and _tool.name not in _SKIP_ENV_INJECTION):
@@ -1093,6 +1250,14 @@ def _build_product_client(product: str, env_name: str):
             username=creds["username"],
             password=creds["password"],
         )
+    if product == "horizon":
+        from wingman_mcp.horizon_api import HorizonClient
+        return HorizonClient(
+            server_url=creds["server_url"],
+            username=creds["username"],
+            password=creds["password"],
+            domain=creds["domain"],
+        )
     raise RuntimeError(f"No client implementation registered for product '{product}'.")
 
 
@@ -1106,8 +1271,10 @@ def _get_product_client(product: str, env_name: str = "default"):
 def _register_product_api_tools() -> None:
     """Build the dispatch table for non-UEM product API tools."""
     from wingman_mcp import app_volumes_api as av
+    from wingman_mcp import horizon_api as hz
 
     _PRODUCT_API_TOOLS.update({
+        # App Volumes
         "app_volumes_search_applications":     ("app_volumes", av.search_applications, None),
         "app_volumes_get_application":         ("app_volumes", av.get_application, ["app_id"]),
         "app_volumes_search_packages":         ("app_volumes", av.search_packages, None),
@@ -1115,6 +1282,17 @@ def _register_product_api_tools() -> None:
         "app_volumes_search_writable_volumes": ("app_volumes", av.search_writable_volumes, None),
         "app_volumes_get_writable_volume":     ("app_volumes", av.get_writable_volume, ["writable_id"]),
         "app_volumes_grow_writable_volume":    ("app_volumes", av.grow_writable_volume, ["writable_ids", "size_mb"]),
+        # Horizon
+        "horizon_search_desktop_pools":  ("horizon", hz.search_desktop_pools, None),
+        "horizon_get_desktop_pool":      ("horizon", hz.get_desktop_pool, ["pool_id"]),
+        "horizon_search_farms":          ("horizon", hz.search_farms, None),
+        "horizon_get_farm":              ("horizon", hz.get_farm, ["farm_id"]),
+        "horizon_search_machines":       ("horizon", hz.search_machines, None),
+        "horizon_get_machine":           ("horizon", hz.get_machine, ["machine_id"]),
+        "horizon_search_sessions":       ("horizon", hz.search_sessions, None),
+        "horizon_get_session":           ("horizon", hz.get_session, ["session_id"]),
+        "horizon_disconnect_sessions":   ("horizon", hz.disconnect_sessions, ["session_ids"]),
+        "horizon_restart_machines":      ("horizon", hz.restart_machines, ["machine_ids"]),
     })
 
 
