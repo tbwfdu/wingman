@@ -1,7 +1,7 @@
 """MCP server exposing Workspace ONE UEM documentation search tools."""
 import hashlib
 import json
-from typing import Any
+from typing import Any, Optional
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -17,10 +17,14 @@ app = Server("wingman-mcp")
 # Lazy-loaded stores and auth
 _stores: dict[str, Any] = {}
 _embeddings = None
+# UEM auth cache.
 # In local/stdio mode: keyed by environment name.
 # In HTTP mode: keyed by SHA-256 of credential values (so different users get
 # separate UEMAuth instances with their own token caches).
 _auths: dict[str, Any] = {}
+
+# Non-UEM product API client cache, keyed by (product, env_name).
+_product_clients: dict[tuple[str, str], Any] = {}
 
 
 def _get_embeddings():
@@ -913,6 +917,106 @@ TOOLS = [
             "required": ["source_env", "dest_env", "source_og_id", "dest_og_id"],
         },
     ),
+    # -----------------------------------------------------------------------
+    # App Volumes API tools (require auth via 'wingman-mcp auth set --product app_volumes')
+    # -----------------------------------------------------------------------
+    Tool(
+        name="app_volumes_search_applications",
+        description=(
+            "Search Applications in App Volumes Manager. An Application is a "
+            "top-level product that contains one or more Packages. "
+            "Requires App Volumes credentials configured via "
+            "'wingman-mcp auth set --product app_volumes'."
+        ),
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    ),
+    Tool(
+        name="app_volumes_get_application",
+        description="Get details of an App Volumes Application by its ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "app_id": {"type": "string", "description": "Numeric Application ID"},
+            },
+            "required": ["app_id"],
+        },
+    ),
+    Tool(
+        name="app_volumes_search_packages",
+        description=(
+            "Search Packages in App Volumes Manager. A Package is the actual "
+            "delivery payload (a virtual disk) attached to one Application."
+        ),
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    ),
+    Tool(
+        name="app_volumes_get_package",
+        description="Get details of an App Volumes Package by its ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "package_id": {"type": "string", "description": "Numeric Package ID"},
+            },
+            "required": ["package_id"],
+        },
+    ),
+    Tool(
+        name="app_volumes_search_writable_volumes",
+        description=(
+            "Search Writable Volumes in App Volumes Manager. "
+            "Filters: volume_guid, user_guid, owner_name, "
+            "created_after / updated_after (ISO 8601), "
+            "min_capacity / max_capacity (MB), count."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "volume_guid": {"type": "string"},
+                "user_guid": {"type": "string"},
+                "owner_name": {"type": "string"},
+                "created_after": {"type": "string", "description": "ISO 8601 datetime"},
+                "updated_after": {"type": "string", "description": "ISO 8601 datetime"},
+                "min_capacity": {"type": "integer", "description": "Minimum capacity (MB)"},
+                "max_capacity": {"type": "integer", "description": "Maximum capacity (MB)"},
+                "count": {"type": "integer", "description": "Limit results"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="app_volumes_get_writable_volume",
+        description="Get an App Volumes Writable Volume by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "writable_id": {"type": "string", "description": "Numeric Writable Volume ID"},
+            },
+            "required": ["writable_id"],
+        },
+    ),
+    Tool(
+        name="app_volumes_grow_writable_volume",
+        description=(
+            "Increase the size of one or more Writable Volumes. "
+            "Mutation — non-destructive but irreversible. Pass the volume IDs "
+            "to grow and the new size in MB (must exceed current size)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "writable_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "IDs of the Writable Volumes to grow",
+                },
+                "size_mb": {
+                    "type": "integer",
+                    "description": "New size in MB (must exceed current size)",
+                },
+            },
+            "required": ["writable_ids", "size_mb"],
+        },
+    ),
 ]
 
 # Inject 'env' parameter into all UEM API tool schemas (except uem_list_environments)
@@ -928,8 +1032,11 @@ _ENV_PROPERTY = {
 _SKIP_ENV_INJECTION = {"uem_list_environments", "uem_migrate_scripts",
                        "uem_migrate_sensors", "uem_migrate_profiles",
                        "uem_migrate_apps"}
+# Tool-name prefixes that get the per-product `env` parameter injected.
+_PRODUCT_TOOL_PREFIXES = ("uem_", "app_volumes_")
 for _tool in TOOLS:
-    if _tool.name.startswith("uem_") and _tool.name not in _SKIP_ENV_INJECTION:
+    if (any(_tool.name.startswith(p) for p in _PRODUCT_TOOL_PREFIXES)
+            and _tool.name not in _SKIP_ENV_INJECTION):
         _tool.inputSchema["properties"].update(_ENV_PROPERTY)
 
 
@@ -955,6 +1062,60 @@ def _require_auth(env_name: str = "default") -> "UEMAuth":
             "Client Secret, Token URL, and API Base URL."
         )
     return auth
+
+
+# ---------------------------------------------------------------------------
+# Per-product (non-UEM) tool dispatch
+# ---------------------------------------------------------------------------
+
+# Each entry: tool_name → (product_slug, function, positional_keys)
+_PRODUCT_API_TOOLS: dict[str, tuple[str, Any, Optional[list[str]]]] = {}
+
+
+def _build_product_client(product: str, env_name: str):
+    """Construct a product API client from stored credentials.
+
+    Returns the client or raises RuntimeError with a user-friendly message.
+    """
+    from wingman_mcp.credentials import load_product_credentials
+
+    creds = load_product_credentials(product, env_name)
+    if creds is None:
+        raise RuntimeError(
+            f"{product} credentials are not configured for environment "
+            f"'{env_name}'. Run 'wingman-mcp auth set --product {product} "
+            f"--env {env_name}' to provide them."
+        )
+    if product == "app_volumes":
+        from wingman_mcp.app_volumes_api import AppVolumesClient
+        return AppVolumesClient(
+            manager_url=creds["manager_url"],
+            username=creds["username"],
+            password=creds["password"],
+        )
+    raise RuntimeError(f"No client implementation registered for product '{product}'.")
+
+
+def _get_product_client(product: str, env_name: str = "default"):
+    key = (product, env_name)
+    if key not in _product_clients:
+        _product_clients[key] = _build_product_client(product, env_name)
+    return _product_clients[key]
+
+
+def _register_product_api_tools() -> None:
+    """Build the dispatch table for non-UEM product API tools."""
+    from wingman_mcp import app_volumes_api as av
+
+    _PRODUCT_API_TOOLS.update({
+        "app_volumes_search_applications":     ("app_volumes", av.search_applications, None),
+        "app_volumes_get_application":         ("app_volumes", av.get_application, ["app_id"]),
+        "app_volumes_search_packages":         ("app_volumes", av.search_packages, None),
+        "app_volumes_get_package":             ("app_volumes", av.get_package, ["package_id"]),
+        "app_volumes_search_writable_volumes": ("app_volumes", av.search_writable_volumes, None),
+        "app_volumes_get_writable_volume":     ("app_volumes", av.get_writable_volume, ["writable_id"]),
+        "app_volumes_grow_writable_volume":    ("app_volumes", av.grow_writable_volume, ["writable_ids", "size_mb"]),
+    })
 
 
 # Map of API tool names to (function, argument keys)
@@ -1161,6 +1322,32 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
         except Exception as e:
             return [TextContent(type="text", text=f"API error: {e}")]
+
+    # --- Non-UEM product API tools ---
+    if not _PRODUCT_API_TOOLS:
+        _register_product_api_tools()
+
+    if name in _PRODUCT_API_TOOLS:
+        product, func, positional_keys = _PRODUCT_API_TOOLS[name]
+        env_name = arguments.pop("env", "default")
+        try:
+            client = _get_product_client(product, env_name)
+        except RuntimeError as e:
+            return [TextContent(type="text", text=str(e))]
+
+        try:
+            if positional_keys:
+                pos_args = [arguments[k] for k in positional_keys]
+                kwargs = {k: v for k, v in arguments.items() if k not in positional_keys}
+                result = func(client, *pos_args, **kwargs)
+            else:
+                result = func(client, **arguments)
+            return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+        except Exception as e:
+            # On auth failures, drop the cached client so the next call re-logs in.
+            if "401" in str(e) or "403" in str(e):
+                _product_clients.pop((product, env_name), None)
+            return [TextContent(type="text", text=f"{product} API error: {e}")]
 
     return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
