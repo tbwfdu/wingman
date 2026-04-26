@@ -97,7 +97,9 @@ def _discover_rn_urls_for(product: ProductConfig) -> list[str]:
     import requests
 
     rn = product.release_notes
-    assert rn is not None and rn.source_type == "docs_web"
+    assert rn is not None and (rn.bundle_prefixes or rn.bundle_exact), (
+        f"_discover_rn_urls_for requires bundle_prefixes or bundle_exact on {product.slug}"
+    )
 
     all_xmls: list[str] = []
     for sm in DEFAULT_SITEMAPS:
@@ -128,7 +130,9 @@ def _ingest_docs_web(
     splitter: RecursiveCharacterTextSplitter,
 ) -> int:
     rn = product.release_notes
-    assert rn is not None and rn.source_type == "docs_web"
+    assert rn is not None and (rn.bundle_prefixes or rn.bundle_exact), (
+        f"_ingest_docs_web requires bundle_prefixes or bundle_exact on {product.slug}"
+    )
 
     print(f"  Discovering RN bundles for {product.slug}...")
     urls = _discover_rn_urls_for(product)
