@@ -1397,6 +1397,176 @@ TOOLS = [
             "required": ["user_resource"],
         },
     ),
+    # -----------------------------------------------------------------------
+    # Horizon Cloud Service (Next-Gen) API tools — read-only
+    # (require auth via 'wingman-mcp auth set --product horizon_cloud')
+    # -----------------------------------------------------------------------
+    Tool(
+        name="horizon_cloud_search_pools",
+        description=(
+            "List pool groups in a Horizon Cloud tenant. "
+            "Filters: page, size, sort, search, sort_by_used_sessions, "
+            "sort_by_consumed_sessions, include_internal_pools, "
+            "exclude_disabled_pools, include_deleting_pools. "
+            "org_id is auto-attached from the configured credentials."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "search": {"type": "string"},
+                "sort_by_used_sessions": {"type": "boolean"},
+                "sort_by_consumed_sessions": {"type": "boolean"},
+                "include_internal_pools": {"type": "boolean"},
+                "exclude_disabled_pools": {"type": "boolean"},
+                "include_deleting_pools": {"type": "boolean"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_get_pool",
+        description="Get a Horizon Cloud pool group by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {"pool_id": {"type": "string"}},
+            "required": ["pool_id"],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_templates",
+        description=(
+            "List templates (golden images) in a Horizon Cloud tenant. "
+            "Filters: brokerable_only, expanded, page, size, sort, "
+            "template_search, reported_search."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "brokerable_only": {"type": "boolean"},
+                "expanded": {"type": "boolean"},
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "template_search": {"type": "string"},
+                "reported_search": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_get_template",
+        description="Get a Horizon Cloud template by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "template_id": {"type": "string"},
+                "expanded": {"type": "boolean"},
+            },
+            "required": ["template_id"],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_sessions",
+        description=(
+            "List active user sessions across pools. Filters: userId, "
+            "excludeAssigned. Pass userId to scope to one user."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "userId": {"type": "string"},
+                "excludeAssigned": {"type": "boolean"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_edge_deployments",
+        description=(
+            "List Edge deployments (per-site control plane) for a Horizon "
+            "Cloud tenant. Filters: page, size, sort, search, "
+            "include_reported_status."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "search": {"type": "string"},
+                "include_reported_status": {"type": "boolean"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_get_edge_deployment",
+        description="Get a Horizon Cloud Edge deployment by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "edge_id": {"type": "string"},
+                "include_reported_status": {"type": "boolean"},
+            },
+            "required": ["edge_id"],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_active_directories",
+        description=(
+            "List configured Active Directory / domain integrations. "
+            "Filters: expanded, page, size, sort, search."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "expanded": {"type": "boolean"},
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "search": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_uag_deployments",
+        description=(
+            "List UAG (Unified Access Gateway) deployments associated with "
+            "the Horizon Cloud tenant. Filters: page, size, sort, search."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "search": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_sso_configurations",
+        description=(
+            "List SSO / identity-provider configurations for the Horizon "
+            "Cloud tenant. Filters: expanded, page, size, sort, search."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "expanded": {"type": "boolean"},
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "search": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
 ]
 
 # Inject 'env' parameter into all UEM API tool schemas (except uem_list_environments)
@@ -1413,8 +1583,8 @@ _SKIP_ENV_INJECTION = {"uem_list_environments", "uem_migrate_scripts",
                        "uem_migrate_sensors", "uem_migrate_profiles",
                        "uem_migrate_apps"}
 # Tool-name prefixes that get the per-product `env` parameter injected.
-_PRODUCT_TOOL_PREFIXES = ("uem_", "app_volumes_", "horizon_", "identity_service_",
-                           "access_")
+_PRODUCT_TOOL_PREFIXES = ("uem_", "app_volumes_", "horizon_", "horizon_cloud_",
+                           "identity_service_", "access_")
 for _tool in TOOLS:
     if (any(_tool.name.startswith(p) for p in _PRODUCT_TOOL_PREFIXES)
             and _tool.name not in _SKIP_ENV_INJECTION):
@@ -1498,6 +1668,14 @@ def _build_product_client(product: str, env_name: str):
             client_secret=creds["client_secret"],
             token_url=creds.get("token_url") or None,
         )
+    if product == "horizon_cloud":
+        from wingman_mcp.horizon_cloud_api import HorizonCloudClient
+        return HorizonCloudClient(
+            api_base_url=creds["api_base_url"],
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+            org_id=creds["org_id"],
+        )
     raise RuntimeError(f"No client implementation registered for product '{product}'.")
 
 
@@ -1514,6 +1692,7 @@ def _register_product_api_tools() -> None:
     from wingman_mcp import horizon_api as hz
     from wingman_mcp import identity_service_api as ids
     from wingman_mcp import access_api as acc
+    from wingman_mcp import horizon_cloud_api as hc
 
     _PRODUCT_API_TOOLS.update({
         # App Volumes
@@ -1551,6 +1730,17 @@ def _register_product_api_tools() -> None:
         "access_search_entitlements":           ("access", acc.search_entitlements, None),
         "access_get_activity_summary_report":   ("access", acc.get_activity_summary_report, ["interval"]),
         "access_create_user":                   ("access", acc.create_user, ["user_resource"]),
+        # Horizon Cloud
+        "horizon_cloud_search_pools":               ("horizon_cloud", hc.search_pools, None),
+        "horizon_cloud_get_pool":                   ("horizon_cloud", hc.get_pool, ["pool_id"]),
+        "horizon_cloud_search_templates":           ("horizon_cloud", hc.search_templates, None),
+        "horizon_cloud_get_template":               ("horizon_cloud", hc.get_template, ["template_id"]),
+        "horizon_cloud_search_sessions":            ("horizon_cloud", hc.search_sessions, None),
+        "horizon_cloud_search_edge_deployments":    ("horizon_cloud", hc.search_edge_deployments, None),
+        "horizon_cloud_get_edge_deployment":        ("horizon_cloud", hc.get_edge_deployment, ["edge_id"]),
+        "horizon_cloud_search_active_directories":  ("horizon_cloud", hc.search_active_directories, None),
+        "horizon_cloud_search_uag_deployments":     ("horizon_cloud", hc.search_uag_deployments, None),
+        "horizon_cloud_search_sso_configurations":  ("horizon_cloud", hc.search_sso_configurations, None),
     })
 
 
