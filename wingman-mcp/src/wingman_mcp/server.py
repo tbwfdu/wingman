@@ -1174,6 +1174,107 @@ TOOLS = [
             "required": ["machine_ids"],
         },
     ),
+    # -----------------------------------------------------------------------
+    # Identity Service API tools
+    # (require auth via 'wingman-mcp auth set --product identity_service')
+    # -----------------------------------------------------------------------
+    Tool(
+        name="identity_service_search_users",
+        description=(
+            "Search SCIM 2.0 users in an Omnissa Identity Service tenant. "
+            "Supports SCIM filter syntax (e.g. filter='userName eq \"alice@x.com\"'), "
+            "startIndex/count paging, and sortBy/sortOrder."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "filter": {"type": "string", "description": "SCIM filter expression"},
+                "sortBy": {"type": "string"},
+                "sortOrder": {"type": "string", "description": "ascending or descending"},
+                "startIndex": {"type": "integer", "description": "1-based page start"},
+                "count": {"type": "integer", "description": "Page size"},
+                "attributes": {"type": "string", "description": "Comma list of attrs to return"},
+                "excludedAttributes": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="identity_service_get_user",
+        description="Get a SCIM user by ID from an Omnissa Identity Service tenant.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string"},
+                "attributes": {"type": "string"},
+                "excludedAttributes": {"type": "string"},
+            },
+            "required": ["user_id"],
+        },
+    ),
+    Tool(
+        name="identity_service_search_groups",
+        description="Search SCIM 2.0 groups in an Omnissa Identity Service tenant.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "filter": {"type": "string"},
+                "sortBy": {"type": "string"},
+                "sortOrder": {"type": "string"},
+                "startIndex": {"type": "integer"},
+                "count": {"type": "integer"},
+                "attributes": {"type": "string"},
+                "excludedAttributes": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="identity_service_get_group",
+        description="Get a SCIM group by ID from an Omnissa Identity Service tenant.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "group_id": {"type": "string"},
+                "attributes": {"type": "string"},
+                "excludedAttributes": {"type": "string"},
+            },
+            "required": ["group_id"],
+        },
+    ),
+    Tool(
+        name="identity_service_search_directories",
+        description="List the user directories configured in an Identity Service tenant.",
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    ),
+    Tool(
+        name="identity_service_get_directory",
+        description="Get a directory configuration by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {"directory_id": {"type": "string"}},
+            "required": ["directory_id"],
+        },
+    ),
+    Tool(
+        name="identity_service_create_user",
+        description=(
+            "Create a SCIM 2.0 user in an Omnissa Identity Service tenant (mutation). "
+            "Pass the full SCIM user resource — at minimum `schemas`, `userName`, and "
+            "`name`/`emails`. The directory the user lands in is determined by the "
+            "client's authorization scope."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "user_resource": {
+                    "type": "object",
+                    "description": "Full SCIM 2.0 User resource (schemas, userName, name, emails, etc.)",
+                },
+            },
+            "required": ["user_resource"],
+        },
+    ),
 ]
 
 # Inject 'env' parameter into all UEM API tool schemas (except uem_list_environments)
@@ -1190,7 +1291,7 @@ _SKIP_ENV_INJECTION = {"uem_list_environments", "uem_migrate_scripts",
                        "uem_migrate_sensors", "uem_migrate_profiles",
                        "uem_migrate_apps"}
 # Tool-name prefixes that get the per-product `env` parameter injected.
-_PRODUCT_TOOL_PREFIXES = ("uem_", "app_volumes_", "horizon_")
+_PRODUCT_TOOL_PREFIXES = ("uem_", "app_volumes_", "horizon_", "identity_service_")
 for _tool in TOOLS:
     if (any(_tool.name.startswith(p) for p in _PRODUCT_TOOL_PREFIXES)
             and _tool.name not in _SKIP_ENV_INJECTION):
@@ -1258,6 +1359,14 @@ def _build_product_client(product: str, env_name: str):
             password=creds["password"],
             domain=creds["domain"],
         )
+    if product == "identity_service":
+        from wingman_mcp.identity_service_api import IdentityServiceClient
+        return IdentityServiceClient(
+            tenant_url=creds["tenant_url"],
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+            token_url=creds.get("token_url") or None,
+        )
     raise RuntimeError(f"No client implementation registered for product '{product}'.")
 
 
@@ -1272,6 +1381,7 @@ def _register_product_api_tools() -> None:
     """Build the dispatch table for non-UEM product API tools."""
     from wingman_mcp import app_volumes_api as av
     from wingman_mcp import horizon_api as hz
+    from wingman_mcp import identity_service_api as ids
 
     _PRODUCT_API_TOOLS.update({
         # App Volumes
@@ -1293,6 +1403,14 @@ def _register_product_api_tools() -> None:
         "horizon_get_session":           ("horizon", hz.get_session, ["session_id"]),
         "horizon_disconnect_sessions":   ("horizon", hz.disconnect_sessions, ["session_ids"]),
         "horizon_restart_machines":      ("horizon", hz.restart_machines, ["machine_ids"]),
+        # Identity Service
+        "identity_service_search_users":       ("identity_service", ids.search_users, None),
+        "identity_service_get_user":           ("identity_service", ids.get_user, ["user_id"]),
+        "identity_service_search_groups":      ("identity_service", ids.search_groups, None),
+        "identity_service_get_group":          ("identity_service", ids.get_group, ["group_id"]),
+        "identity_service_search_directories": ("identity_service", ids.search_directories, None),
+        "identity_service_get_directory":      ("identity_service", ids.get_directory, ["directory_id"]),
+        "identity_service_create_user":        ("identity_service", ids.create_user, ["user_resource"]),
     })
 
 
