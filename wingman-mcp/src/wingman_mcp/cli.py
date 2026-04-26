@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 def cmd_serve(args):
@@ -228,7 +229,11 @@ def cmd_check(args):
 def cmd_status(args):
     """Show store status."""
     from wingman_mcp.config import get_store_dir, get_store_keys
-    from wingman_mcp.credentials import get_status, list_environments
+    from wingman_mcp.credentials import (
+        known_products,
+        list_product_environments,
+        _product_env_status,
+    )
     from pathlib import Path
 
     print("RAG Stores:")
@@ -241,19 +246,26 @@ def cmd_status(args):
         else:
             print(f"  {key}: not found ({store_dir})")
 
-    print("\nUEM Auth:")
-    envs = list_environments()
-    if not envs:
-        print("  No environments configured.")
-    else:
-        all_status = get_status()
-        if "environments" in all_status:
-            print(f"  {all_status['configured_environments']} environment(s)")
-            for name, env_status in all_status["environments"].items():
-                api_url = env_status.get("api_base_url", "(missing)")
-                configured = env_status.get("configured", "no")
-                marker = "+" if configured == "yes" else "-"
-                print(f"  [{marker}] {name}: {api_url}")
+    print("\nProduct API Credentials:")
+    any_configured = False
+    for product in known_products():
+        envs = list_product_environments(product)
+        if not envs:
+            continue
+        any_configured = True
+        print(f"  [{product}]")
+        for name in envs:
+            status = _product_env_status(product, name)
+            url = (status.get("api_base_url")
+                   or status.get("server_url")
+                   or status.get("manager_url")
+                   or status.get("tenant_url")
+                   or "(missing)")
+            configured = status.get("configured", "no")
+            marker = "+" if configured == "yes" else "-"
+            print(f"    [{marker}] {name}: {url}")
+    if not any_configured:
+        print("  No products configured. Run 'wingman-mcp auth set --product <slug>'.")
 
 
 def cmd_export(args):
@@ -286,110 +298,190 @@ def cmd_export(args):
 # auth subcommands
 # ---------------------------------------------------------------------------
 
+_FRIENDLY_PROMPTS: dict[str, dict[str, str]] = {
+    # Per-product field prompts.  Falls back to the field name if missing.
+    "uem": {
+        "client_id": "Client ID",
+        "client_secret": "Client Secret",
+        "token_url": "OAuth Token URL (e.g. https://na.uemauth.workspaceone.com/connect/token)",
+        "api_base_url": "UEM API Base URL (e.g. https://as1831.awmdm.com)",
+    },
+    "horizon": {
+        "username": "Horizon admin username",
+        "password": "Horizon admin password",
+        "server_url": "Connection Server URL (e.g. https://horizon.example.com)",
+        "domain": "Active Directory domain (e.g. CORP)",
+    },
+    "horizon_cloud": {
+        "client_id": "CSP API Client ID",
+        "client_secret": "CSP API Client Secret",
+        "api_base_url": "Horizon Cloud API base (e.g. https://cloud-sg.horizon.omnissa.com)",
+        "org_id": "Organization (tenant) ID",
+    },
+    "app_volumes": {
+        "username": "AV Manager admin username",
+        "password": "AV Manager admin password",
+        "manager_url": "App Volumes Manager URL (e.g. https://av.example.com)",
+    },
+    "access": {
+        "client_id": "OAuth Client ID",
+        "client_secret": "OAuth Client Secret",
+        "tenant_url": "Access tenant URL (e.g. https://yourtenant.workspaceoneaccess.com)",
+        "token_url": "OAuth Token URL",
+    },
+    "identity_service": {
+        "client_id": "OAuth Client ID",
+        "client_secret": "OAuth Client Secret",
+        "tenant_url": "Identity Service tenant URL",
+        "token_url": "OAuth Token URL",
+    },
+}
+
+
+def _resolve_product(args) -> str:
+    from wingman_mcp.credentials import known_products
+    product = getattr(args, "product", None) or "uem"
+    if product not in known_products():
+        print(f"Error: unknown product '{product}'. Known: {known_products()}")
+        sys.exit(1)
+    return product
+
+
 def cmd_auth(args):
     """Dispatch auth subcommands."""
     action = getattr(args, "auth_action", None)
     env_name = getattr(args, "env", "default")
+    product = _resolve_product(args)
     if action == "set":
-        _auth_set(env_name)
+        _auth_set(product, env_name)
     elif action == "status":
-        _auth_status(env_name)
+        _auth_status(product, env_name)
     elif action == "clear":
-        _auth_clear(env_name)
+        _auth_clear(product, env_name)
     elif action == "test":
-        _auth_test(env_name)
+        _auth_test(product, env_name)
     elif action == "list":
-        _auth_list()
+        _auth_list(getattr(args, "product", None))
     else:
-        print("Usage: wingman-mcp auth {set,status,clear,test,list}")
+        print("Usage: wingman-mcp auth {set,status,clear,test,list} [--product <slug>]")
         sys.exit(1)
 
 
-def _auth_set(env_name: str):
-    from wingman_mcp.credentials import save_credentials
+def _prompt_for_field(product: str, field_name: str, secret: bool) -> str:
+    label = _FRIENDLY_PROMPTS.get(product, {}).get(field_name, field_name)
+    if secret:
+        val = getpass.getpass(f"{label}: ").strip()
+    else:
+        val = input(f"{label}: ").strip()
+    if not val:
+        print(f"Error: {label} is required.")
+        sys.exit(1)
+    return val
 
-    print(f"Configure UEM API credentials (environment: {env_name})")
+
+def _auth_set(product: str, env_name: str):
+    from wingman_mcp.credentials import get_schema, save_product_credentials
+
+    schema = get_schema(product)
+    print(f"Configure {schema.label} credentials (environment: {env_name})")
     print("(secrets are stored in your OS keychain)\n")
 
-    api_base_url = input("UEM API Base URL (e.g. https://as1831.awmdm.com): ").strip()
-    if not api_base_url:
-        print("Error: API base URL is required.")
-        sys.exit(1)
+    fields: dict[str, str] = {}
+    # Prompt non-secrets first (history-friendly), then secrets.
+    for k in schema.config_keys:
+        fields[k] = _prompt_for_field(product, k, secret=False)
+    for k in schema.secret_keys:
+        secret = "secret" in k or "password" in k
+        fields[k] = _prompt_for_field(product, k, secret=secret)
 
-    token_url = input("OAuth Token URL (e.g. https://na.uemauth.workspaceone.com/connect/token): ").strip()
-    if not token_url:
-        print("Error: Token URL is required.")
-        sys.exit(1)
-
-    client_id = input("Client ID: ").strip()
-    if not client_id:
-        print("Error: Client ID is required.")
-        sys.exit(1)
-
-    client_secret = getpass.getpass("Client Secret: ").strip()
-    if not client_secret:
-        print("Error: Client Secret is required.")
-        sys.exit(1)
-
-    save_credentials(client_id, client_secret, token_url, api_base_url, env_name=env_name)
-    print(f"\nCredentials saved for environment '{env_name}'.")
+    save_product_credentials(product, env_name, **fields)
+    print(f"\nCredentials saved: product={product} env={env_name}")
 
 
-def _auth_status(env_name: str):
-    from wingman_mcp.credentials import get_status
+def _auth_status(product: str, env_name: str):
+    from wingman_mcp.credentials import _product_env_status
 
-    # If user explicitly passed --env, show that env; otherwise show all
-    status = get_status(env_name)
-    print(f"  [{env_name}]")
+    status = _product_env_status(product, env_name)
+    print(f"  [{product}/{env_name}]")
     for k, v in status.items():
         print(f"    {k}: {v}")
 
 
-def _auth_clear(env_name: str):
-    from wingman_mcp.credentials import clear_credentials
+def _auth_clear(product: str, env_name: str):
+    from wingman_mcp.credentials import clear_product_credentials
 
-    clear_credentials(env_name)
-    print(f"Credentials cleared for environment '{env_name}'.")
+    clear_product_credentials(product, env_name)
+    print(f"Credentials cleared: product={product} env={env_name}")
 
 
-def _auth_test(env_name: str):
-    from wingman_mcp.credentials import load_credentials
-    from wingman_mcp.auth import UEMAuth
+def _auth_test(product: str, env_name: str):
+    """Test that credentials load and (for UEM) acquire a token."""
+    from wingman_mcp.credentials import load_product_credentials
 
-    creds = load_credentials(env_name)
+    creds = load_product_credentials(product, env_name)
     if creds is None:
-        print(f"Error: UEM credentials not configured for environment '{env_name}'. "
-              f"Run 'wingman-mcp auth set --env {env_name}' first.")
+        print(f"Error: credentials not configured for product='{product}' env='{env_name}'. "
+              f"Run 'wingman-mcp auth set --product {product} --env {env_name}' first.")
         sys.exit(1)
 
-    print(f"Testing connection for environment '{env_name}' to {creds['token_url']} ...")
-    auth = UEMAuth(creds)
-    result = auth.test_connection()
+    if product == "uem":
+        from wingman_mcp.credentials import load_credentials
+        from wingman_mcp.auth import UEMAuth
 
-    if result["success"]:
-        print(f"  Success! Token valid for ~{result['expires_in']}s")
-        print(f"  API base URL: {result['api_base_url']}")
-    else:
-        print(f"  Failed: {result['error']}")
-        sys.exit(1)
+        uem_creds = load_credentials(env_name)
+        print(f"Testing UEM connection for environment '{env_name}' to {uem_creds['token_url']} ...")
+        auth = UEMAuth(uem_creds)
+        result = auth.test_connection()
 
-
-def _auth_list():
-    from wingman_mcp.credentials import list_environments, get_status
-
-    envs = list_environments()
-    if not envs:
-        print("  No environments configured.")
-        print("  Run 'wingman-mcp auth set --env <name>' to add one.")
+        if result["success"]:
+            print(f"  Success! Token valid for ~{result['expires_in']}s")
+            print(f"  API base URL: {result['api_base_url']}")
+        else:
+            print(f"  Failed: {result['error']}")
+            sys.exit(1)
         return
 
-    print(f"  {len(envs)} environment(s) configured:\n")
-    for name in envs:
-        status = get_status(name)
-        api_url = status.get("api_base_url", "(missing)")
-        configured = status.get("configured", "no")
-        marker = "+" if configured == "yes" else "-"
-        print(f"  [{marker}] {name}: {api_url}")
+    # Other products: just confirm fields are loadable.  Token acquisition
+    # for non-UEM products is exercised by the per-product API clients
+    # (added in later phases).
+    print(f"Credentials present for product='{product}' env='{env_name}'.")
+    for k, v in creds.items():
+        if k in ("password", "client_secret"):
+            v = "(set)"
+        print(f"  {k}: {v}")
+
+
+def _auth_list(product: Optional[str]):
+    from wingman_mcp.credentials import (
+        known_products,
+        list_product_environments,
+        _product_env_status,
+    )
+
+    products = [product] if product else known_products()
+    any_configured = False
+    for p in products:
+        envs = list_product_environments(p)
+        if not envs:
+            if product:  # only complain when a specific product was asked for
+                print(f"  No environments configured for product='{p}'.")
+                print(f"  Run 'wingman-mcp auth set --product {p} --env <name>' to add one.")
+            continue
+        any_configured = True
+        print(f"  [{p}] {len(envs)} environment(s):")
+        for name in envs:
+            status = _product_env_status(p, name)
+            url = (status.get("api_base_url")
+                   or status.get("server_url")
+                   or status.get("manager_url")
+                   or status.get("tenant_url")
+                   or "(missing)")
+            configured = status.get("configured", "no")
+            marker = "+" if configured == "yes" else "-"
+            print(f"    [{marker}] {name}: {url}")
+    if not any_configured and not product:
+        print("  No environments configured for any product.")
+        print("  Run 'wingman-mcp auth set --product <slug> --env <name>' to add one.")
 
 
 def main():
@@ -447,20 +539,25 @@ def main():
     export_parser.add_argument("--no-blobs", action="store_true",
                                help="Skip downloading app binaries")
 
-    auth_parser = sub.add_parser("auth", help="Manage UEM API credentials")
+    auth_parser = sub.add_parser("auth", help="Manage product API credentials")
     auth_sub = auth_parser.add_subparsers(dest="auth_action")
 
     for name, help_text in [
-        ("set", "Set UEM API credentials (interactive)"),
-        ("status", "Show auth configuration (all envs if --env not specified)"),
+        ("set", "Set product API credentials (interactive)"),
+        ("status", "Show auth configuration for a product+env"),
         ("clear", "Remove stored credentials"),
-        ("test", "Test OAuth token fetch"),
+        ("test", "Test credential loading (UEM also tests OAuth token fetch)"),
     ]:
         p = auth_sub.add_parser(name, help=help_text)
+        p.add_argument("--product", "-p", default="uem",
+                        help="Product slug (default: 'uem'). "
+                             "One of: uem, horizon, horizon_cloud, app_volumes, access, identity_service")
         p.add_argument("--env", "-e", default="default",
                         help="Environment name (default: 'default')")
 
-    auth_sub.add_parser("list", help="List all configured environments")
+    list_p = auth_sub.add_parser("list", help="List all configured environments")
+    list_p.add_argument("--product", "-p", default=None,
+                         help="Limit to one product slug (default: show all)")
 
     args = parser.parse_args()
 
