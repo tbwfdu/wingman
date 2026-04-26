@@ -76,6 +76,8 @@ Tags: {tags}"""
                     docs.append(Document(
                         page_content=content.strip(),
                         metadata={
+                            "product": "uem",
+                            "product_label": "Workspace ONE UEM",
                             "source": safe_source,
                             "full_url": safe_full_path,
                             "path": path,
