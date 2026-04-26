@@ -99,8 +99,17 @@ def test_total_product_count():
     # 10 first-class products (uem, horizon, horizon_cloud, app_volumes,
     # uag, dem, thinapp, access, intelligence, identity_service) plus
     # 10 split-out sub-products (mtd, servicenow, hub_services, xr_hub,
-    # pivd_manager, admin_assistant, ens, seg, okta_scim, aw_cloud_connector).
-    assert len(PRODUCTS) == 20
+    # pivd_manager, admin_assistant, ens, seg, okta_scim, aw_cloud_connector)
+    # plus techzone.
+    assert len(PRODUCTS) == 21
+
+
+def test_techzone_product_registered():
+    cfg = PRODUCTS["techzone"]
+    assert "techzone.omnissa.com/resource" in cfg.include_keywords
+    assert any("blog" in kw for kw in cfg.exclude_keywords)
+    assert cfg.release_notes is None
+    assert cfg.api is None
 
 
 def test_uem_family_allowlist_excludes_access_and_intelligence():

@@ -140,13 +140,25 @@ TOOLS = [
         name="search_omnissa_docs",
         description=(
             "Search Omnissa product documentation for a specific product. "
-            "Use this for non-UEM products like Horizon, App Volumes, Unified "
-            "Access Gateway, ThinApp, Dynamic Environment Manager, Horizon "
-            "Cloud Service, Workspace ONE Access, Intelligence, and Omnissa "
-            "Identity Service. For Workspace ONE UEM (and Access/Hub/Intelligence), "
-            "prefer 'search_uem_docs' which has tuned multi-family scoring. "
-            "Run 'wingman-mcp ingest --list' on the host to see which product "
-            "stores have been built — only built stores can be searched."
+            "Covers Horizon, Horizon Cloud, App Volumes, Unified Access "
+            "Gateway, ThinApp, Dynamic Environment Manager, Workspace ONE "
+            "UEM, Workspace ONE Access, Intelligence, Omnissa Identity "
+            "Service, the WS1 sub-products (MTD, ServiceNow, Hub Services, "
+            "XR Hub, PIV-D Manager, Admin Assistant, ENS, SEG, Okta SCIM, "
+            "AirWatch Cloud Connector), and Omnissa TechZone.\n\n"
+            "When to pick which product:\n"
+            "  - product='techzone' for 'how do I X?', 'what's the best way "
+            "    to Y?', design / reference architecture / tutorial / "
+            "    deployment-pattern questions that span products. TechZone "
+            "    is curated reference content, not config reference.\n"
+            "  - product='<specific>' for product-specific configuration, "
+            "    admin console settings, payload reference, troubleshooting.\n"
+            "  - For a Workspace ONE UEM question, prefer 'search_uem_docs' "
+            "    which has tuned multi-family scoring; this tool is the "
+            "    fallback for everything else.\n\n"
+            "Run 'wingman-mcp ingest --list' on the host to see which "
+            "product stores have been built — only built stores can be "
+            "searched."
         ),
         inputSchema={
             "type": "object",
@@ -156,7 +168,9 @@ TOOLS = [
                     "description": (
                         "Product slug. One of: uem, horizon, horizon_cloud, "
                         "app_volumes, uag, thinapp, dem, access, intelligence, "
-                        "identity_service."
+                        "identity_service, mtd, servicenow, hub_services, "
+                        "xr_hub, pivd_manager, admin_assistant, ens, seg, "
+                        "okta_scim, aw_cloud_connector, techzone."
                     ),
                 },
                 "query": {

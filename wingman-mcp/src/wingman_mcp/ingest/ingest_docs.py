@@ -31,6 +31,7 @@ RN_VERSION_RE = re.compile(r"Release-NotesV(2\d{3})", re.IGNORECASE)
 DEFAULT_SITEMAPS = [
     "https://docs.omnissa.com/sitemap.xml",
     "https://developer.omnissa.com/sitemap.xml",
+    "https://techzone.omnissa.com/sitemap.xml",
 ]
 
 # Skip versioned bundles unless they are release notes. Omnissa uses two
@@ -57,6 +58,15 @@ def _parse_sitemap(content):
 
 
 def _get_sub_sitemaps(url):
+    """Return the list of sitemap files reachable from `url`.
+
+    Two shapes are supported:
+    * Sitemap-index (docs.omnissa.com): contains `<loc>` entries pointing
+      to other sitemap.xml files. Returns those.
+    * Flat urlset (techzone.omnissa.com): contains `<loc>` entries pointing
+      directly to pages. Returns `[url]` so the caller re-fetches and
+      treats its `<loc>` entries as page URLs.
+    """
     try:
         res = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
     except requests.RequestException as e:
@@ -64,7 +74,11 @@ def _get_sub_sitemaps(url):
         return []
     if res.status_code != 200:
         return []
-    return [loc for loc in _parse_sitemap(res.content) if loc.lower().endswith(".xml")]
+    sub_xmls = [loc for loc in _parse_sitemap(res.content) if loc.lower().endswith(".xml")]
+    if sub_xmls:
+        return sub_xmls
+    # Flat urlset — let the caller treat the input URL as a page-list sitemap.
+    return [url]
 
 
 def _extract_bundle(url):

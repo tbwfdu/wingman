@@ -307,7 +307,6 @@ PRODUCTS: dict[str, ProductConfig] = {
         ),
         include_keywords=[
             "workspace-one", "uem", "access", "intelligence", "hub",
-            "techzone.omnissa.com/resource",
         ],
         exclude_keywords=[
             "vdi", "app-volumes", "daas", "horizon",
@@ -332,6 +331,8 @@ PRODUCTS: dict[str, ProductConfig] = {
             "ws1uem-secure-email", "ws1uem_kcd_seg", "ws1uemseg",
             "okta_scim",
             "airwatchcloudconnector",
+            # TechZone is its own product
+            "techzone.omnissa.com",
             *_NEVER_INGEST,
         ],
         extra_bundles=_UEM_EXTRA_BUNDLES,
@@ -785,6 +786,32 @@ PRODUCTS: dict[str, ProductConfig] = {
         skip_versioned_bundles=True,
         search_prefix="Workspace ONE Okta SCIM Provisioning",
         # No dedicated RN bundle visible.
+        release_notes=None,
+    ),
+
+    # -----------------------------------------------------------------------
+    # Omnissa TechZone — cross-product reference content (best practices,
+    # reference architectures, how-to guides, tutorials).
+    # -----------------------------------------------------------------------
+    "techzone": ProductConfig(
+        slug="techzone",
+        label="Omnissa TechZone",
+        description=(
+            "Omnissa TechZone reference content — best practices, "
+            "reference architectures, how-to guides, and tutorials "
+            "spanning the entire Omnissa product portfolio."
+        ),
+        include_keywords=["techzone.omnissa.com/resource"],
+        exclude_keywords=[
+            "techzone.omnissa.com/blog",
+            "techzone.omnissa.com/users/",
+            "?share=",
+        ],
+        # TechZone URLs aren't bundle-based, so versioned-bundle skipping
+        # has no effect either way — leave at the default.
+        skip_versioned_bundles=True,
+        search_prefix="Omnissa TechZone",
+        # No release-notes concept on TechZone — content is rolling.
         release_notes=None,
     ),
 
