@@ -105,27 +105,44 @@ def cmd_ingest(args):
 
     embeddings = LocalEmbeddings()
 
-    # Phase 1: per-product docs ingest
-    for slug in product_slugs:
-        if slug in docs_targets:
-            print(f"\n--- Ingesting {slug} documentation ---")
-            from wingman_mcp.ingest.ingest_docs import ingest_product
-            ingest_product(
-                product=PRODUCTS[slug],
-                store_dir=get_store_dir(slug),
-                embeddings=embeddings,
-                max_workers=args.max_workers,
-                batch_size=args.batch_size,
-            )
-
-    # Phase 2: API reference (single combined store, multi-product)
+    # Resolve API + RN target expansion before counting steps so the
+    # progress total is accurate.
     if "api" in other_targets:
         api_targets = ["uem"] + [s for s in product_slugs if PRODUCTS[s].api is not None]
+    if "release_notes" in other_targets:
+        rn_targets = [s for s in product_slugs if PRODUCTS[s].release_notes is not None]
 
+    # docs steps run in registry order; api / RN run in user-input order.
+    ordered_docs = [s for s in product_slugs if s in docs_targets]
+    total_steps = len(ordered_docs) + len(api_targets) + len(rn_targets)
+    if total_steps == 0:
+        print("Nothing to do. Run 'wingman-mcp ingest --list' to see options.")
+        return
+
+    print(f"\nIngesting across {total_steps} step(s)...")
+    import time
+    t_start = time.time()
+    step = 0
+
+    # --- Phase 1: per-product docs ---
+    for slug in ordered_docs:
+        step += 1
+        print(f"\n[{step}/{total_steps}] Ingesting {slug} documentation")
+        from wingman_mcp.ingest.ingest_docs import ingest_product
+        ingest_product(
+            product=PRODUCTS[slug],
+            store_dir=get_store_dir(slug),
+            embeddings=embeddings,
+            max_workers=args.max_workers,
+            batch_size=args.batch_size,
+        )
+
+    # --- Phase 2: API references (one step per product) ---
     if api_targets:
-        print(f"\n--- Ingesting API reference for: {', '.join(api_targets)} ---")
         from wingman_mcp.ingest.ingest_api import ingest_api, ingest_api_for_product
         for slug in api_targets:
+            step += 1
+            print(f"\n[{step}/{total_steps}] Ingesting API reference for {slug}")
             if slug == "uem":
                 ingest_api(store_dir=get_store_dir("api"), embeddings=embeddings)
             else:
@@ -135,19 +152,21 @@ def cmd_ingest(args):
                     embeddings=embeddings,
                 )
 
-    # Phase 3: release notes (combined store, per-product targets)
-    if "release_notes" in other_targets:
-        rn_targets = [s for s in product_slugs if PRODUCTS[s].release_notes is not None]
+    # --- Phase 3: release notes (one step per product) ---
     if rn_targets:
-        print(f"\n--- Ingesting release notes for: {', '.join(rn_targets)} ---")
         from wingman_mcp.ingest.ingest_release_notes import ingest_release_notes
-        ingest_release_notes(
-            store_dir=get_store_dir("release_notes"),
-            embeddings=embeddings,
-            products=rn_targets,
-        )
+        for slug in rn_targets:
+            step += 1
+            print(f"\n[{step}/{total_steps}] Ingesting release notes for {slug}")
+            ingest_release_notes(
+                store_dir=get_store_dir("release_notes"),
+                embeddings=embeddings,
+                products=[slug],
+            )
 
-    print("\nIngestion complete.")
+    elapsed = int(time.time() - t_start)
+    mins, secs = divmod(elapsed, 60)
+    print(f"\nIngestion complete: {step}/{total_steps} steps in {mins}m {secs}s.")
 
 
 def cmd_check(args):
