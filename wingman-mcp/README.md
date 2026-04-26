@@ -1,28 +1,29 @@
 # wingman-mcp
 
-> Wingman — your AI sidekick for Workspace ONE UEM. Docs, APIs, and release notes, all one question away — right from your editor or AI chat app.
+> Wingman — your AI sidekick for Omnissa EUC. Docs, APIs, and release notes for UEM, Horizon, App Volumes, Access, Identity Service, and more — plus live API access — all one question away from your editor or AI chat app.
 
-MCP server providing Workspace ONE UEM documentation search via local RAG and live API access to your UEM environment.
+MCP server providing Omnissa product documentation search via local RAG and live API access to UEM, Horizon, App Volumes, Workspace ONE Access, Omnissa Identity Service, and Horizon Cloud Service.
 
-Exposes 40 tools over the [Model Context Protocol](https://modelcontextprotocol.io):
+Exposes 82 tools over the [Model Context Protocol](https://modelcontextprotocol.io):
 
 ### Documentation search (local RAG — no auth required)
 
 | Tool | Description |
 |------|-------------|
-| `search_uem_docs` | Product documentation (guides, enrollment, profiles, compliance, etc.) |
-| `search_api_reference` | REST API endpoint reference (MDM, MAM, MCM, MEM, System) |
-| `search_release_notes` | Release notes by version (what's new, bug fixes, resolved issues) |
+| `search_uem_docs` | Workspace ONE UEM product documentation (multi-family scoring) |
+| `search_omnissa_docs` | Per-product docs for any of the 20+ Omnissa product slugs (Horizon, App Volumes, UAG, DEM, Access, Intelligence, Identity Service, ThinApp, TechZone, …) |
+| `search_api_reference` | REST API endpoint reference — pass `product` to scope to UEM, Horizon, Horizon Cloud, App Volumes, UAG, Access, Intelligence, or Identity Service |
+| `search_release_notes` | Release notes by version, scoped per product |
 
-### Live UEM API (requires auth — see [UEM API Authentication](#uem-api-authentication) below)
+### Live product APIs (require auth — see [Authentication](#authentication) below)
 
-#### Environments
+#### UEM — Environments
 
 | Tool | Description |
 |------|-------------|
 | `uem_list_environments` | List all configured UEM environments and their connection status |
 
-#### Devices
+#### UEM — Devices
 
 | Tool | Description |
 |------|-------------|
@@ -34,7 +35,7 @@ Exposes 40 tools over the [Model Context Protocol](https://modelcontextprotocol.
 | `uem_get_device_network` | Device network info (IPs, MAC, WiFi, cellular) |
 | `uem_send_device_command` | Send commands to a device (DeviceQuery, Lock, EnterpriseWipe, etc.) |
 
-#### Users & Organization Groups
+#### UEM — Users & Organization Groups
 
 | Tool | Description |
 |------|-------------|
@@ -45,7 +46,7 @@ Exposes 40 tools over the [Model Context Protocol](https://modelcontextprotocol.
 | `uem_get_og_children` | List child OGs under a parent |
 | `uem_search_smart_groups` | Search smart groups |
 
-#### Profiles
+#### UEM — Profiles
 
 | Tool | Description |
 |------|-------------|
@@ -53,7 +54,7 @@ Exposes 40 tools over the [Model Context Protocol](https://modelcontextprotocol.
 | `uem_get_profile` | Get full profile details by ID (V2 round-trip or metadata-transforms fallback) |
 | `uem_create_profile` | Create a profile from V2 JSON (Windows all payloads; Apple/Android V2 payloads) |
 
-#### Scripts
+#### UEM — Scripts
 
 | Tool | Description |
 |------|-------------|
@@ -62,7 +63,7 @@ Exposes 40 tools over the [Model Context Protocol](https://modelcontextprotocol.
 | `uem_create_script` | Create a script from individual parameters (name, platform, script content) |
 | `uem_create_script_from_json` | Create a script from JSON (round-trip from `uem_get_script`) |
 
-#### Sensors
+#### UEM — Sensors
 
 | Tool | Description |
 |------|-------------|
@@ -71,7 +72,7 @@ Exposes 40 tools over the [Model Context Protocol](https://modelcontextprotocol.
 | `uem_create_sensor` | Create a sensor from individual parameters (name, platform, script content) |
 | `uem_create_sensor_from_json` | Create a sensor from JSON (round-trip from `uem_get_sensor`) |
 
-#### Applications
+#### UEM — Applications
 
 | Tool | Description |
 |------|-------------|
@@ -79,7 +80,7 @@ Exposes 40 tools over the [Model Context Protocol](https://modelcontextprotocol.
 | `uem_get_app` | Get full app details by ID (includes blob GUID and original filename) |
 | `uem_download_app_blob` | Download an application binary to disk |
 
-#### Compliance & Security Baselines
+#### UEM — Compliance & Security Baselines
 
 | Tool | Description |
 |------|-------------|
@@ -88,7 +89,7 @@ Exposes 40 tools over the [Model Context Protocol](https://modelcontextprotocol.
 | `uem_search_baseline_policies` | Browse GPO policies in a baseline catalog version |
 | `uem_get_baseline_policy` | Get full details of a baseline policy by UUID |
 
-#### Export (backup)
+#### UEM — Export (backup)
 
 | Tool | Description |
 |------|-------------|
@@ -96,7 +97,7 @@ Exposes 40 tools over the [Model Context Protocol](https://modelcontextprotocol.
 
 Exports create a timestamped directory with a `manifest.json` and individual JSON files for each resource. App binaries are optionally downloaded alongside metadata. All fields (including read-only ones) are preserved. Exported resources can be re-imported using the `create_*_from_json` tools.
 
-#### Migration (cross-environment)
+#### UEM — Migration (cross-environment)
 
 | Tool | Description |
 |------|-------------|
@@ -106,6 +107,84 @@ Exports create a timestamped directory with a `manifest.json` and individual JSO
 | `uem_migrate_apps` | Migrate internal applications (including binaries) between environments |
 
 Migration tools require two named environments to be configured (source and destination). They skip resources that already exist in the destination by name. Smart group assignments are stripped from profiles since IDs differ between environments.
+
+#### App Volumes
+
+Session-cookie auth against an App Volumes Manager. Configure with `wingman-mcp auth set --product app_volumes`.
+
+| Tool | Description |
+|------|-------------|
+| `app_volumes_search_applications` | List Applications (top-level products that contain Packages) |
+| `app_volumes_get_application` | Get details of an Application by ID |
+| `app_volumes_search_packages` | List Packages (the deliverable virtual disks) |
+| `app_volumes_get_package` | Get details of a Package by ID |
+| `app_volumes_search_writable_volumes` | Search Writable Volumes by GUID, owner, capacity, or date |
+| `app_volumes_get_writable_volume` | Get a Writable Volume by ID |
+| `app_volumes_grow_writable_volume` | Grow one or more Writable Volumes to a new size in MB *(mutation)* |
+
+#### Horizon (Connection Server)
+
+Bearer-token auth against a Horizon Connection Server. Configure with `wingman-mcp auth set --product horizon`.
+
+| Tool | Description |
+|------|-------------|
+| `horizon_search_desktop_pools` | List desktop pools (paged, filterable) |
+| `horizon_get_desktop_pool` | Get a desktop pool by ID |
+| `horizon_search_farms` | List farms (RDSH) |
+| `horizon_get_farm` | Get a farm by ID |
+| `horizon_search_machines` | List machines (VMs) |
+| `horizon_get_machine` | Get a machine by ID |
+| `horizon_search_sessions` | List active and disconnected user sessions (v8 schema) |
+| `horizon_get_session` | Get a session by ID |
+| `horizon_disconnect_sessions` | Disconnect one or more user sessions *(mutation)* |
+| `horizon_restart_machines` | Restart (reboot) one or more machines, optional `force_operation` *(mutation)* |
+
+#### Workspace ONE Access
+
+OAuth client-credentials auth on a per-tenant URL. Configure with `wingman-mcp auth set --product access`.
+
+| Tool | Description |
+|------|-------------|
+| `access_search_users` | Search SCIM users (filter, startIndex/count, sortBy/sortOrder) |
+| `access_get_user` | Get a SCIM user by ID |
+| `access_search_groups` | Search SCIM groups |
+| `access_get_group` | Get a SCIM group by ID |
+| `access_search_entitlements` | Search catalog-item entitlements per user or for the authenticated client |
+| `access_get_activity_summary_report` | Get the activity summary report for a time interval |
+| `access_create_user` | Create a local user, optionally sending a setup email *(mutation)* |
+
+#### Omnissa Identity Service
+
+OAuth client-credentials auth on a per-tenant URL. Configure with `wingman-mcp auth set --product identity_service`.
+
+| Tool | Description |
+|------|-------------|
+| `identity_service_search_users` | Search SCIM 2.0 users (full SCIM filter syntax) |
+| `identity_service_get_user` | Get a SCIM user by ID |
+| `identity_service_search_groups` | Search SCIM 2.0 groups |
+| `identity_service_get_group` | Get a SCIM group by ID |
+| `identity_service_search_directories` | List configured directories |
+| `identity_service_get_directory` | Get a directory by ID |
+| `identity_service_create_user` | Create a SCIM 2.0 user *(mutation)* |
+
+#### Horizon Cloud Service (Next-Gen) — read-only
+
+OAuth client-credentials auth against the regional cloud URL (`cloud-sg.horizon.omnissa.com`, etc.). `org_id` is auto-attached on every request. Configure with `wingman-mcp auth set --product horizon_cloud`.
+
+| Tool | Description |
+|------|-------------|
+| `horizon_cloud_search_pools` | List pool groups |
+| `horizon_cloud_get_pool` | Get a pool group by ID |
+| `horizon_cloud_search_templates` | List templates (golden images) |
+| `horizon_cloud_get_template` | Get a template by ID |
+| `horizon_cloud_search_sessions` | Filter active user sessions across pools |
+| `horizon_cloud_search_edge_deployments` | List Edge deployments (per-site control plane) |
+| `horizon_cloud_get_edge_deployment` | Get an Edge deployment by ID |
+| `horizon_cloud_search_active_directories` | List configured AD / domain integrations |
+| `horizon_cloud_search_uag_deployments` | List Unified Access Gateway deployments |
+| `horizon_cloud_search_sso_configurations` | List SSO / identity-provider configurations |
+
+Mutations on Horizon Cloud (provisioning, batch VM actions, deployment lifecycle) are intentionally not exposed in this round — reach them via `search_api_reference --product horizon_cloud` if you need them.
 
 ## What's included
 
@@ -196,7 +275,7 @@ API references live in two combined stores keyed by `product` metadata.
 | Intelligence docs | `intelligence` | Workspace ONE Intelligence (split out of UEM) |
 | Identity Service docs | `identity_service` | Omnissa Identity Service |
 | Release notes | `release_notes` (or `<slug>_rn`) | All products' release notes, filterable |
-| API references | `api` (or `<slug>_api`) | UEM REST API; non-UEM products coming in Plan 2 |
+| API references | `api` (or `<slug>_api`) | UEM, Horizon, Horizon Cloud, App Volumes, UAG, Access, Intelligence, Identity Service |
 
 Build all of them with `wingman-mcp ingest`. Build only one product's
 release notes with e.g. `wingman-mcp ingest horizon_rn`.
@@ -404,70 +483,93 @@ wingman-mcp export --types scripts sensors
 wingman-mcp export --no-blobs
 ```
 
-## UEM API Authentication
+## Authentication
 
-The live API tools connect to your Workspace ONE UEM environment using OAuth 2.0 (client credentials). This is optional — the RAG documentation search tools work without it.
+The live API tools connect to your Omnissa product environments using each product's native auth flow. Authentication is optional — the RAG documentation search tools work without it.
 
-### What you need
+Each `wingman-mcp auth` command takes `--product <slug>` (default `uem`) and `--env <name>` (default `default`).
 
-- **UEM API Base URL** — Your UEM console URL (e.g. `https://as1831.awmdm.com`)
-- **OAuth Token URL** — Your region's token endpoint (e.g. `https://na.uemauth.workspaceone.com/connect/token`)
-- **Client ID** — OAuth client ID from your UEM console
-- **Client Secret** — OAuth client secret
+### Supported products and credential fields
+
+| Product | `--product` slug | Auth flow | Required fields |
+|---|---|---|---|
+| Workspace ONE UEM | `uem` | OAuth client credentials | `client_id`, `client_secret`, `token_url`, `api_base_url` |
+| Horizon (Connection Server) | `horizon` | Session login (returns JWT) | `username`, `password`, `server_url`, `domain` |
+| Horizon Cloud Service | `horizon_cloud` | OAuth client credentials | `client_id`, `client_secret`, `api_base_url`, `org_id` |
+| App Volumes | `app_volumes` | Session cookie login | `username`, `password`, `manager_url` |
+| Workspace ONE Access | `access` | OAuth client credentials | `client_id`, `client_secret`, `tenant_url`, `token_url` |
+| Omnissa Identity Service | `identity_service` | OAuth client credentials | `client_id`, `client_secret`, `tenant_url`, `token_url` |
+
+Secrets (passwords, client_secret) are stored in your OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service). Non-secret config (URLs, domain, org_id) is stored in `~/.wingman-mcp/config.json`.
 
 ### Configure credentials
 
 ```bash
+# Default product is uem — these two lines are equivalent
 wingman-mcp auth set
+wingman-mcp auth set --product uem
+
+# Configure a different product
+wingman-mcp auth set --product horizon
+wingman-mcp auth set --product app_volumes
+wingman-mcp auth set --product access
+wingman-mcp auth set --product identity_service
+wingman-mcp auth set --product horizon_cloud
 ```
 
-This prompts for each value interactively. Secrets (Client ID and Client Secret) are stored in your OS keychain (macOS Keychain, Windows Credential Manager, or Linux Secret Service). The Token URL and API Base URL are stored in `~/.wingman-mcp/config.json`.
+You'll be prompted for the fields the product needs.
 
 ### Multiple environments
 
-You can configure multiple UEM environments (e.g. dev, staging, prod) using the `--env` flag:
+Each product can have multiple named environments (e.g. dev, staging, prod):
 
 ```bash
-# Configure a named environment
-wingman-mcp auth set --env prod
-wingman-mcp auth set --env dev
+# Configure named environments per product
+wingman-mcp auth set --product uem --env prod
+wingman-mcp auth set --product horizon --env lab
 
-# List all configured environments
+# List configured environments — all products by default, or filter by product
 wingman-mcp auth list
+wingman-mcp auth list --product horizon
 
-# Test a specific environment
-wingman-mcp auth test --env prod
+# Show status for one (product, env)
+wingman-mcp auth status --product uem --env prod
 
-# Show status for a specific environment
-wingman-mcp auth status --env prod
+# Test credentials (UEM also performs an OAuth token fetch)
+wingman-mcp auth test --product horizon --env lab
 ```
 
-When calling UEM API tools, pass the `env` parameter to target a specific environment. If omitted, the `default` environment is used.
+When calling product API tools, pass the `env` parameter to target a specific environment. If omitted, the `default` environment is used.
 
-Migration tools (`uem_migrate_*`) accept separate `source_env` and `dest_env` parameters to move resources between environments.
-
-### Verify configuration
-
-```bash
-# Show what's configured (secrets are masked)
-wingman-mcp auth status
-
-# Test the OAuth token fetch against your token URL
-wingman-mcp auth test
-```
+UEM migration tools (`uem_migrate_*`) accept separate `source_env` and `dest_env` parameters to move resources between UEM environments.
 
 ### Remove credentials
 
 ```bash
-wingman-mcp auth clear
-
-# Clear a specific environment
-wingman-mcp auth clear --env prod
+wingman-mcp auth clear --product horizon
+wingman-mcp auth clear --product uem --env prod
 ```
 
 ### Environment variable overrides
 
-For CI, Docker, or headless environments where the OS keychain is unavailable, you can set credentials via environment variables. These take precedence over stored values:
+For CI, Docker, or headless environments where the OS keychain is unavailable, set credentials via environment variables — these take precedence over stored values.
+
+The general namespace is `WINGMAN_MCP_<PRODUCT>_<FIELD>`:
+
+```bash
+# Horizon
+export WINGMAN_MCP_HORIZON_USERNAME="admin"
+export WINGMAN_MCP_HORIZON_PASSWORD="..."
+export WINGMAN_MCP_HORIZON_SERVER_URL="https://horizon.example.com"
+export WINGMAN_MCP_HORIZON_DOMAIN="CORP"
+
+# App Volumes
+export WINGMAN_MCP_APP_VOLUMES_USERNAME="admin"
+export WINGMAN_MCP_APP_VOLUMES_PASSWORD="..."
+export WINGMAN_MCP_APP_VOLUMES_MANAGER_URL="https://av.example.com"
+```
+
+For UEM, the original (unprefixed) env vars from before multi-product support continue to work as aliases:
 
 ```bash
 export WINGMAN_MCP_CLIENT_ID="your-client-id"
@@ -476,7 +578,7 @@ export WINGMAN_MCP_TOKEN_URL="https://na.uemauth.workspaceone.com/connect/token"
 export WINGMAN_MCP_API_URL="https://as1831.awmdm.com"
 ```
 
-Note: environment variables override credentials for all named environments. They are best suited for single-environment setups (CI/Docker).
+(Equivalent to `WINGMAN_MCP_UEM_CLIENT_ID`, `…SECRET`, `…TOKEN_URL`, `…API_BASE_URL`.) Environment variables override credentials for all named environments and are best suited for single-environment setups.
 
 ## Installing with multiple Python versions
 
@@ -555,8 +657,8 @@ python3.12 -m pip show wingman-mcp | grep Location
 ## Troubleshooting
 
 - **"RAG stores not found"** — Copy the stores folder. See Setup Step 2.
-- **"UEM API credentials are not configured"** — Run `wingman-mcp auth set` to provide your OAuth credentials.
-- **"HTTP 401" from auth test** — Double-check your Client ID, Client Secret, and Token URL.
+- **"… credentials are not configured"** — Run `wingman-mcp auth set --product <slug>` for whichever product the tool needs (e.g. `uem`, `horizon`, `app_volumes`, `access`, `identity_service`, `horizon_cloud`).
+- **"HTTP 401" from a tool call** — Double-check the credentials for that product and environment with `wingman-mcp auth status --product <slug> --env <name>`. For UEM, `wingman-mcp auth test` also exercises the OAuth token fetch.
 - **Server not detected** — Make sure `wingman-mcp` is on your PATH. Run `which wingman-mcp` to confirm. If it returns nothing, the binary isn't on your PATH — use `pip show wingman-mcp` to find the install location, then look for the binary in the `bin/` directory alongside that location.
 - **Wrong Python** — If you installed in a virtualenv or conda env, use the full path to the binary in your client config, e.g. `"/Users/you/.venvs/wingman/bin/wingman-mcp"`. See [Installing with multiple Python versions](#installing-with-multiple-python-versions).
 - **`pip install` fails with Python version error** — You're running pip from a Python version below 3.10. Use `python3.12 -m pip install ...` or activate the correct pyenv/conda/venv first.
