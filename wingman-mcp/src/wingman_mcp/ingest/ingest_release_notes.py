@@ -105,7 +105,7 @@ def _discover_rn_urls_for(product: ProductConfig) -> list[str]:
 
     def _fetch(xml_url):
         try:
-            r = requests.get(xml_url, headers={"User-Agent": USER_AGENT}, timeout=15)
+            r = requests.get(xml_url, headers={"User-Agent": USER_AGENT}, timeout=30)
             if r.status_code != 200:
                 return []
             return _parse_sitemap(r.content)

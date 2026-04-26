@@ -1,4 +1,12 @@
-"""Ingest Omnissa web documentation into the UEM Chroma store."""
+"""Ingest Omnissa product documentation into a Chroma store.
+
+This is now product-driven: pass any ProductConfig from
+`wingman_mcp.ingest.products` to crawl that product's docs into its own
+Chroma store.  See `products.py` for the registry.
+
+Backward compat: `ingest_docs()` still exists and ingests the UEM product
+(matching the old behavior).
+"""
 import hashlib
 import os
 import re
@@ -13,6 +21,8 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from tqdm import tqdm
 
+from wingman_mcp.ingest.products import ProductConfig, get_product
+
 USER_AGENT = "WingmanMCP/1.0"
 DOCS_API_HOST = "https://docs-be.omnissa.com"
 SITEMAP_LOC_RE = re.compile(r"<loc>(.*?)</loc>", re.IGNORECASE | re.DOTALL)
@@ -22,113 +32,7 @@ DEFAULT_SITEMAPS = [
     "https://docs.omnissa.com/sitemap.xml",
     "https://developer.omnissa.com/sitemap.xml",
 ]
-INCLUDE_KEYWORDS = [
-    "workspace-one", "uem", "access", "intelligence", "hub",
-    "techzone.omnissa.com/resource",
-]
-EXCLUDE_KEYWORDS = [
-    "vdi", "app-volumes", "daas", "horizon",
-    # UnifiedAccessGateway / UAG is a Horizon component, not UEM. It slips
-    # through INCLUDE_KEYWORDS via "access" — exclude both name variants.
-    "accessgateway", "access-gateway",
-    # ThinApp is legacy Horizon packaging tech.
-    "thinapp",
-    # Horizon Cloud Service admin guides.
-    "-hcs-", "/hcs-", "firstgen-hcs",
-    "techzone.omnissa.com/blog", "techzone.omnissa.com/users/",
-    "?share=", "developer.omnissa.com", "/api/help/", "/apis/",
-]
-ALLOWED_FAMILIES = {"uem", "access", "hub", "intelligence"}
 
-# Bundles that don't match INCLUDE_KEYWORDS but should be ingested.
-# VSaaS preferred; unversioned kept only when no VSaaS variant exists.
-EXTRA_BUNDLES = [
-    # Device management guides
-    "android-device-managementVSaaS",
-    "ios-device-mgmtVSaaS",
-    "macOS-Device-ManagementVSaaS",
-    "LinuxDeviceManagementVSaaS",
-    "ChromeOSDeviceMgmtVSaaS",
-    "closednetworkandroidVSaaS",
-    # App management
-    "ApplicationManagementforAndroidVSaaS",
-    "ApplicationManagementforiOSVSaaS",
-    # Freestyle Orchestrator
-    "Freestyle-Orchestrator-guideVSaaS",
-    # Email / content / comms
-    "WS1UEM-Secure-Email-GatewayVSaaS",
-    "WS1UEM_MEM_GuideVSaaS",
-    "WS1UEM_GmailIntegration_GuideVSaaS",
-    "WS1UEM_ENS2_GuideVSaaS",
-    "WS1UEM_KCD_SEGV2VSaaS",
-    "WS1UEMMobileContentManagement",
-    "AirWatchCloudMessagingVSaaS",
-    # Tunnel
-    "Workspace_ONE_TunnelVSaaS",
-    # Assist
-    "Workspace-ONE-AssistV25.11",
-    "WorkspaceONE-RemoteHelpVSaaS",
-    # Launcher
-    "workspaceonelauncherVSaaS",
-    # Drop Ship Provisioning
-    "workspace_one_drop_ship_provisioningVSaaS",
-    # PowerShell
-    "WS1UEM_PowerShell_Integration_GuideVSaaS",
-    # Boxer
-    "WorkspaceONEBoxerAdminGuide",
-    "WorkspaceONEBoxerAndroidUserGuide",
-    "WorkspaceONEBoxeriOSUserGuide",
-    # WS1 Web / Content / Send
-    "WS1Web",
-    "WS1ContentforAndroid",
-    "WS1ContentforiOS",
-    "WS1Send",
-    # School
-    "Airwatch-SchoolVSaaS",
-    # Android readiness
-    "GettingReadyforAndroidReleasesVSaaS",
-    # Okta integration
-    "workspaceone_okta_integration",
-    # Outages
-    "WS1Outages",
-    # Release notes (component-specific)
-    "Workspace_ONE_Tunnel_Android-RN",
-    "Workspace_ONE_Tunnel_iOS-RN",
-    "Workspace_ONE_Tunnel_macOS-RN",
-    "Workspace_ONE_Tunnel_macOS_Appstore_Client-RN",
-    "Workspace_ONE_Tunnel_Windows-RN",
-    "Workspace_ONE_Tunnel_linux-RN",
-    "Workspace_ONE_Tunnel_ChromeOS-RN",
-    "Workspace_ONE_Tunnel_Container-RN",
-    "WorkspaceONEBoxerforAndroidReleaseNotes",
-    "WorkspaceONEBoxerforiOSReleaseNotes",
-    "workspaceonelauncherforandroid-rn",
-    "WS1AssistReleaseNotes",
-    "WS1AssistAndroidReleaseNotes",
-    "WS1AssistLinuxReleaseNotes",
-    "WS1AssistWindowsDesktopReleaseNotes",
-    "WorkspaceOneAssistmacOSReleaseNotes",
-    "WS1ContentforAndroidRN",
-    "WS1ContentforiOSRN",
-    "WS1WebforAndroidRN",
-    "WS1WebforiOSRN",
-    "WS1SendforAndroidRN",
-    "WS1SendforiOSRN",
-    "WS1SoftwareDistributionAgentReleaseNotes",
-    "ExpMgmtmacOSRN",
-    "OmnissaPassReleaseNotes-Android",
-    "OmnissaPassReleaseNotes-iOS",
-    "PIVDManagerAndroidReleaseNotesVSaaS",
-    "PIVDManageriOSReleaseNotesVSaaS",
-    "workspace_one_drop_ship_provisioning-RN",
-    "workspace-one-admin-assistant-for-macos-release-notesVSaaS",
-    "chromeOSextention-rn",
-    "WorkspaceONE-XRhub-ReleaseNotesVSaaS",
-    "zebramxserviceforandroid-rnVSaaS",
-    "honeywellserviceforandroidreleasenotes",
-]
-# Pre-compute set of lowercase bundle prefixes for fast matching.
-_EXTRA_BUNDLE_SET = {b.lower() for b in EXTRA_BUNDLES}
 # Skip versioned bundles unless they are release notes. Omnissa uses two
 # formats for archive versions:
 #   - V{yyyy}  e.g. V2209, V2410  (YYMM, no separator)
@@ -138,8 +42,14 @@ _VERSIONED_BUNDLE_PATTERN = re.compile(
     r"V\d{4}(?!\w)|V\d{1,2}\.\d+",
     re.IGNORECASE,
 )
-_RELEASE_NOTES_BUNDLE_PATTERN = re.compile(r"(releasenotes|release-notes|-rn|_rn)", re.IGNORECASE)
+_RELEASE_NOTES_BUNDLE_PATTERN = re.compile(
+    r"(releasenotes|release-notes|-rn|_rn)", re.IGNORECASE
+)
 
+
+# ---------------------------------------------------------------------------
+# Sitemap parsing
+# ---------------------------------------------------------------------------
 
 def _parse_sitemap(content):
     text = content.decode("utf-8", errors="ignore") if isinstance(content, bytes) else str(content)
@@ -147,7 +57,11 @@ def _parse_sitemap(content):
 
 
 def _get_sub_sitemaps(url):
-    res = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=15)
+    try:
+        res = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
+    except requests.RequestException as e:
+        print(f"  Warning: failed to fetch sitemap {url}: {e}")
+        return []
     if res.status_code != 200:
         return []
     return [loc for loc in _parse_sitemap(res.content) if loc.lower().endswith(".xml")]
@@ -159,51 +73,42 @@ def _extract_bundle(url):
     return m.group(1) if m else None
 
 
-def _should_ingest(url):
-    low = url.lower()
-    # Always ingest pages from explicitly listed bundles
-    bundle = _extract_bundle(url)
-    if bundle and bundle.lower() in _EXTRA_BUNDLE_SET:
-        return True
-    # Skip versioned bundles (V23xx–V29xx) unless they are release notes
-    if bundle and _VERSIONED_BUNDLE_PATTERN.search(bundle) and not _RELEASE_NOTES_BUNDLE_PATTERN.search(bundle):
-        return False
-    return (
-        any(k in low for k in INCLUDE_KEYWORDS)
-        and not any(k in low for k in EXCLUDE_KEYWORDS)
-    )
+# ---------------------------------------------------------------------------
+# Per-product URL filter
+# ---------------------------------------------------------------------------
+
+def _make_should_ingest(product: ProductConfig):
+    """Build a `_should_ingest(url)` callable for a given product config."""
+    extra_bundle_set = {b.lower() for b in product.extra_bundles}
+    include = list(product.include_keywords)
+    exclude = list(product.exclude_keywords)
+    skip_versioned = product.skip_versioned_bundles
+
+    def _should(url: str) -> bool:
+        low = url.lower()
+        bundle = _extract_bundle(url)
+        # Always include explicitly listed bundles
+        if bundle and bundle.lower() in extra_bundle_set:
+            return True
+        # Skip versioned (archived) bundles unless they are release notes
+        if (
+            skip_versioned
+            and bundle
+            and _VERSIONED_BUNDLE_PATTERN.search(bundle)
+            and not _RELEASE_NOTES_BUNDLE_PATTERN.search(bundle)
+        ):
+            return False
+        return (
+            any(k in low for k in include)
+            and not any(k in low for k in exclude)
+        )
+
+    return _should
 
 
-def _infer_family(url, topic_payload=None):
-    haystack = (url or "").lower()
-    bundle = ((topic_payload or {}).get("bundle_title") or "").lower()
-    title = ((topic_payload or {}).get("title") or "").lower()
-    description = (((topic_payload or {}).get("metadata") or {}).get("description") or "").lower()
-    source_haystack = f"{haystack} {bundle}"
-    content_haystack = f"{title} {description}"
-    combined = f"{source_haystack} {content_haystack}"
-    # Extra bundles are all UEM-ecosystem content
-    url_bundle = _extract_bundle(url)
-    if url_bundle and url_bundle.lower() in _EXTRA_BUNDLE_SET:
-        return "uem"
-    if any(k in source_haystack for k in ("workspace-one-uem", "workspaceone-uem", "workspace one uem", "/uem", "airwatch")):
-        return "uem"
-    if any(k in source_haystack for k in ("workspace one access", "omnissa access")):
-        return "access"
-    if "intelligence" in source_haystack:
-        return "intelligence"
-    if any(k in source_haystack for k in ("intelligent hub", "workspace one hub", "hub services")):
-        return "hub"
-    if any(k in content_haystack for k in ("workspace-one-uem", "workspaceone-uem", "workspace one uem", "airwatch")):
-        return "uem"
-    if any(k in content_haystack for k in ("workspace one access", "omnissa access")):
-        return "access"
-    if "intelligence" in content_haystack:
-        return "intelligence"
-    if any(k in content_haystack for k in ("intelligent hub", "workspace one hub", "hub services")):
-        return "hub"
-    return "general"
-
+# ---------------------------------------------------------------------------
+# Page download
+# ---------------------------------------------------------------------------
 
 def _build_docs_api_url(url):
     parsed = urlparse(url)
@@ -218,7 +123,9 @@ def _build_docs_api_url(url):
 def _extract_text(url):
     api_url = _build_docs_api_url(url)
     if api_url:
-        res = requests.get(api_url, timeout=15, headers={"User-Agent": USER_AGENT, "Accept-Language": "en-US"})
+        res = requests.get(api_url, timeout=15, headers={
+            "User-Agent": USER_AGENT, "Accept-Language": "en-US",
+        })
         if res.status_code == 200 and "application/json" in (res.headers.get("content-type") or ""):
             payload = res.json()
             html = (payload or {}).get("topic_html", "")
@@ -244,27 +151,46 @@ def _extract_text(url):
     return {"text": soup.get_text(separator=" ", strip=True), "topic_payload": None}
 
 
-def _download(url):
-    try:
-        extracted = _extract_text(url)
-        if not extracted:
+def _make_downloader(product: ProductConfig):
+    """Build a `_download(url)` callable for a given product config."""
+    use_inference = product.family_inference is not None
+    allowed = product.allowed_families or set()
+    fixed_family = product.slug
+
+    def _download(url: str):
+        try:
+            extracted = _extract_text(url)
+            if not extracted:
+                return None
+            tp = extracted.get("topic_payload")
+            if use_inference:
+                family = product.family_inference(url, tp)
+                if family not in allowed:
+                    return None
+            else:
+                family = fixed_family
+            text = extracted["text"]
+            meta = {"source": url, "product_family": family}
+            tp = tp or {}
+            if tp.get("title"):
+                meta["title"] = tp["title"]
+            if tp.get("bundle_title"):
+                meta["bundle_title"] = tp["bundle_title"]
+            version = RN_VERSION_RE.search(url or "")
+            if version:
+                meta.update({
+                    "version": version.group(1),
+                    "product": "Workspace ONE UEM",
+                    "type": "release_notes",
+                })
+            return {
+                "doc": Document(page_content=text, metadata=meta),
+                "hash": hashlib.sha256(text.encode()).hexdigest(),
+            }
+        except Exception:
             return None
-        family = _infer_family(url, extracted.get("topic_payload"))
-        if family not in ALLOWED_FAMILIES:
-            return None
-        text = extracted["text"]
-        meta = {"source": url, "product_family": family}
-        tp = extracted.get("topic_payload") or {}
-        if tp.get("title"):
-            meta["title"] = tp["title"]
-        if tp.get("bundle_title"):
-            meta["bundle_title"] = tp["bundle_title"]
-        version = RN_VERSION_RE.search(url or "")
-        if version:
-            meta.update({"version": version.group(1), "product": "Workspace ONE UEM", "type": "release_notes"})
-        return {"doc": Document(page_content=text, metadata=meta), "hash": hashlib.sha256(text.encode()).hexdigest()}
-    except Exception:
-        return None
+
+    return _download
 
 
 def _fmt_duration(seconds):
@@ -272,15 +198,32 @@ def _fmt_duration(seconds):
     return f"{m}m {s}s" if m else f"{s}s"
 
 
-def ingest_docs(store_dir: str, embeddings, max_workers: int = 50, batch_size: int = 500):
-    """Crawl Omnissa sitemaps and ingest UEM docs."""
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def ingest_product(
+    product: ProductConfig,
+    store_dir: str,
+    embeddings,
+    max_workers: int = 50,
+    batch_size: int = 500,
+):
+    """Crawl Omnissa sitemaps and ingest one product's docs into store_dir."""
     t0 = time.time()
+    print(f"\n[{product.slug}] {product.label}")
+    print(f"  Store dir: {store_dir}")
+
     os.makedirs(store_dir, exist_ok=True)
     vectorstore = Chroma(persist_directory=store_dir, embedding_function=embeddings)
     splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
 
+    should_ingest = _make_should_ingest(product)
+    download = _make_downloader(product)
+    extra_bundle_set = {b.lower() for b in product.extra_bundles}
+
     # --- Phase 1: Discover URLs ---
-    print("\n=== Phase 1/3: Discovering URLs from sitemaps ===")
+    print(f"\n=== [{product.slug}] Phase 1/3: Discovering URLs from sitemaps ===")
     all_xmls = []
     for sitemap in DEFAULT_SITEMAPS:
         print(f"  Expanding: {sitemap}")
@@ -288,61 +231,100 @@ def ingest_docs(store_dir: str, embeddings, max_workers: int = 50, batch_size: i
     print(f"  Found {len(all_xmls)} sub-sitemaps")
 
     def _fetch_and_filter_sitemap(xml_url):
-        res = requests.get(xml_url, headers={"User-Agent": USER_AGENT}, timeout=15)
+        try:
+            res = requests.get(xml_url, headers={"User-Agent": USER_AGENT}, timeout=30)
+        except requests.RequestException:
+            return []
         if res.status_code != 200:
             return []
-        return [u for u in _parse_sitemap(res.content) if _should_ingest(u)]
+        return [u for u in _parse_sitemap(res.content) if should_ingest(u)]
 
     all_urls = []
     bundles_found = set()
+    sitemap_errors = 0
     with ThreadPoolExecutor(max_workers=20) as executor:
         futures = {executor.submit(_fetch_and_filter_sitemap, x): x for x in all_xmls}
         for future in tqdm(as_completed(futures), total=len(all_xmls), desc="  Parsing sitemaps"):
-            for u in future.result():
+            try:
+                results = future.result()
+            except Exception:
+                sitemap_errors += 1
+                continue
+            for u in results:
                 all_urls.append(u)
                 b = _extract_bundle(u)
                 if b:
                     bundles_found.add(b)
+    if sitemap_errors:
+        print(f"  Warning: {sitemap_errors} sub-sitemap(s) failed to load; continuing with the rest.")
 
-    # Deduplicate URLs (sitemaps often have dupes across locales)
     all_urls = list(dict.fromkeys(all_urls))
     print(f"  {len(all_urls)} pages to ingest across {len(bundles_found)} bundles")
 
+    if not all_urls:
+        print(f"  No URLs matched the filter for product '{product.slug}'.")
+        print(f"  Tip: refine include_keywords / extra_bundles in products.py.")
+        return
+
     # --- Phase 2: Download & extract ---
-    print(f"\n=== Phase 2/3: Downloading pages ({max_workers} workers) ===")
+    print(f"\n=== [{product.slug}] Phase 2/3: Downloading pages ({max_workers} workers) ===")
     all_docs = []
     failed = 0
     skipped = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_download, u): u for u in all_urls}
-        for future in tqdm(as_completed(futures), total=len(all_urls), desc="  Fetching",
-                           unit="pg", smoothing=0.1):
+        futures = {executor.submit(download, u): u for u in all_urls}
+        for future in tqdm(as_completed(futures), total=len(all_urls),
+                           desc="  Fetching", unit="pg", smoothing=0.1):
             result = future.result()
             if result:
                 all_docs.append(result["doc"])
             else:
                 url = futures[future]
                 bundle = _extract_bundle(url)
-                if bundle and bundle.lower() in _EXTRA_BUNDLE_SET:
+                if bundle and bundle.lower() in extra_bundle_set:
                     failed += 1
                 else:
                     skipped += 1
 
     print(f"  Downloaded {len(all_docs)} pages ({failed} failed, {skipped} filtered out)")
 
+    if not all_docs:
+        print(f"  Nothing to embed for '{product.slug}'.")
+        return
+
     # --- Phase 3: Chunk & embed ---
-    print(f"\n=== Phase 3/3: Chunking & embedding ===")
+    print(f"\n=== [{product.slug}] Phase 3/3: Chunking & embedding ===")
     chunks = splitter.split_documents(all_docs)
     print(f"  {len(chunks)} chunks to embed")
 
     total_added = 0
     chroma_limit = 5000
-    for j in tqdm(range(0, len(chunks), chroma_limit), desc="  Embedding",
-                  unit="batch"):
-        batch = chunks[j : j + chroma_limit]
+    for j in tqdm(range(0, len(chunks), chroma_limit), desc="  Embedding", unit="batch"):
+        batch = chunks[j: j + chroma_limit]
         vectorstore.add_documents(batch)
         total_added += len(batch)
 
     elapsed = time.time() - t0
-    print(f"\n=== Done! {total_added} chunks added in {_fmt_duration(elapsed)} ===")
+    print(f"\n=== [{product.slug}] Done — {total_added} chunks added in {_fmt_duration(elapsed)} ===")
+
+
+def ingest_docs(store_dir: str, embeddings, max_workers: int = 50, batch_size: int = 500):
+    """Backward-compatible entry: ingest the UEM product."""
+    ingest_product(get_product("uem"), store_dir, embeddings,
+                   max_workers=max_workers, batch_size=batch_size)
+
+
+# ---------------------------------------------------------------------------
+# Compatibility re-exports for code that imported helpers from this module
+# (notably check.py).  Build them from the UEM product config.
+# ---------------------------------------------------------------------------
+
+_UEM = get_product("uem")
+INCLUDE_KEYWORDS = _UEM.include_keywords
+EXCLUDE_KEYWORDS = _UEM.exclude_keywords
+ALLOWED_FAMILIES = _UEM.allowed_families or set()
+EXTRA_BUNDLES = _UEM.extra_bundles
+_should_ingest = _make_should_ingest(_UEM)
+_infer_family = _UEM.family_inference
+_download = _make_downloader(_UEM)
