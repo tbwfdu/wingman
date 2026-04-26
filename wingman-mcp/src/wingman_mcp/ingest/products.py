@@ -213,13 +213,14 @@ _UEM_EXTRA_BUNDLES = [
     # Freestyle Orchestrator
     "Freestyle-Orchestrator-guideVSaaS",
     # Email / content / comms
-    "WS1UEM-Secure-Email-GatewayVSaaS",
+    # ENS / SEG / Admin Assistant / XR Hub / PIV-D moved to dedicated products.
     "WS1UEM_MEM_GuideVSaaS",
     "WS1UEM_GmailIntegration_GuideVSaaS",
-    "WS1UEM_ENS2_GuideVSaaS",
-    "WS1UEM_KCD_SEGV2VSaaS",
     "WS1UEMMobileContentManagement",
     "AirWatchCloudMessagingVSaaS",
+    # Intelligent Hub per-platform RN (the Hub APP is family-merged into UEM)
+    "workspace-one-intelligent-hub-for-ios-release-notesVSaaS",
+    "workspace-one-intelligent-hub-for-macos-release-notesVSaaS",
     # Tunnel
     "Workspace_ONE_TunnelVSaaS",
     # Assist
@@ -275,12 +276,8 @@ _UEM_EXTRA_BUNDLES = [
     "ExpMgmtmacOSRN",
     "OmnissaPassReleaseNotes-Android",
     "OmnissaPassReleaseNotes-iOS",
-    "PIVDManagerAndroidReleaseNotesVSaaS",
-    "PIVDManageriOSReleaseNotesVSaaS",
     "workspace_one_drop_ship_provisioning-RN",
-    "workspace-one-admin-assistant-for-macos-release-notesVSaaS",
     "chromeOSextention-rn",
-    "WorkspaceONE-XRhub-ReleaseNotesVSaaS",
     "zebramxserviceforandroid-rnVSaaS",
     "honeywellserviceforandroidreleasenotes",
 ]
@@ -323,6 +320,18 @@ PRODUCTS: dict[str, ProductConfig] = {
             # Access and Intelligence split out to separate stores
             "workspace-one-access", "workspaceoneaccess", "ws1-access",
             "ws1_access", "intelligence",
+            # The following 10 sub-products are also their own stores now;
+            # exclude their bundles from being scraped into the UEM store.
+            "mobile-threat-defense", "mobilethreatdefense",
+            "uemservicenow", "uem-servicenow",
+            "hub-services",
+            "xrhub",
+            "pivdmanager",
+            "admin-assistant",
+            "ws1uem_ens", "ws1uemens",
+            "ws1uem-secure-email", "ws1uem_kcd_seg", "ws1uemseg",
+            "okta_scim",
+            "airwatchcloudconnector",
             *_NEVER_INGEST,
         ],
         extra_bundles=_UEM_EXTRA_BUNDLES,
@@ -606,6 +615,196 @@ PRODUCTS: dict[str, ProductConfig] = {
             api_group="omnissa-identity-service",
             spec_format="openapi_json",
         ),
+    ),
+
+    # -----------------------------------------------------------------------
+    # Workspace ONE Mobile Threat Defense
+    # -----------------------------------------------------------------------
+    "mtd": ProductConfig(
+        slug="mtd",
+        label="Workspace ONE Mobile Threat Defense",
+        description="Omnissa Workspace ONE Mobile Threat Defense (MTD).",
+        include_keywords=["mobile-threat-defense", "mobilethreatdefense"],
+        exclude_keywords=list(_NEVER_INGEST),
+        extra_bundles=["WorkspaceONE-MobileThreatDefenseVSaaS"],
+        skip_versioned_bundles=True,
+        search_prefix="Workspace ONE Mobile Threat Defense",
+        # No dedicated RN bundle — updates ride in the rolling VSaaS bundle.
+        release_notes=None,
+    ),
+
+    # -----------------------------------------------------------------------
+    # Workspace ONE ServiceNow Integration
+    # -----------------------------------------------------------------------
+    "servicenow": ProductConfig(
+        slug="servicenow",
+        label="Workspace ONE ServiceNow Integration",
+        description="Omnissa Workspace ONE UEM ↔ ServiceNow integration.",
+        include_keywords=["uemservicenow", "uem-servicenow"],
+        exclude_keywords=list(_NEVER_INGEST),
+        extra_bundles=["WorkspaceONEUEMServiceNowIntegrationsVSaaS"],
+        skip_versioned_bundles=True,
+        search_prefix="Workspace ONE ServiceNow Integration",
+        release_notes=ReleaseNotesSource(
+            bundle_exact=["WorkspaceONEUEMServiceNowReleaseNotesVSaaS"],
+            version_re=r"$nope^",
+        ),
+    ),
+
+    # -----------------------------------------------------------------------
+    # Workspace ONE Hub Services
+    # -----------------------------------------------------------------------
+    "hub_services": ProductConfig(
+        slug="hub_services",
+        label="Workspace ONE Hub Services",
+        description=(
+            "Omnissa Workspace ONE Hub Services — cloud catalog/notifications "
+            "service backing the Intelligent Hub app."
+        ),
+        include_keywords=["hub-services"],
+        exclude_keywords=list(_NEVER_INGEST),
+        extra_bundles=["workspace-one-hub-services"],
+        skip_versioned_bundles=True,
+        search_prefix="Workspace ONE Hub Services",
+        release_notes=ReleaseNotesSource(
+            bundle_exact=["workspace-one-hub-services-release-notes"],
+            version_re=r"$nope^",
+        ),
+    ),
+
+    # -----------------------------------------------------------------------
+    # Workspace ONE XR Hub
+    # -----------------------------------------------------------------------
+    "xr_hub": ProductConfig(
+        slug="xr_hub",
+        label="Workspace ONE XR Hub",
+        description="Omnissa Workspace ONE XR Hub.",
+        include_keywords=["xrhub", "xr-hub"],
+        exclude_keywords=list(_NEVER_INGEST),
+        extra_bundles=["WorkspaceONE-XRhubVSaaS"],
+        skip_versioned_bundles=True,
+        search_prefix="Workspace ONE XR Hub",
+        release_notes=ReleaseNotesSource(
+            bundle_exact=["WorkspaceONE-XRhub-ReleaseNotesVSaaS"],
+            version_re=r"$nope^",
+        ),
+    ),
+
+    # -----------------------------------------------------------------------
+    # Workspace ONE PIV-D Manager
+    # -----------------------------------------------------------------------
+    "pivd_manager": ProductConfig(
+        slug="pivd_manager",
+        label="Workspace ONE PIV-D Manager",
+        description="Omnissa Workspace ONE PIV-D Manager (PIV-derived credentials).",
+        include_keywords=["pivdmanager", "pivd-manager"],
+        exclude_keywords=list(_NEVER_INGEST),
+        extra_bundles=["PIVDManagerGuideVSaaS"],
+        skip_versioned_bundles=True,
+        search_prefix="Workspace ONE PIV-D Manager",
+        release_notes=ReleaseNotesSource(
+            bundle_exact=[
+                "PIVDManagerAndroidReleaseNotesVSaaS",
+                "PIVDManageriOSReleaseNotesVSaaS",
+            ],
+            version_re=r"$nope^",
+        ),
+    ),
+
+    # -----------------------------------------------------------------------
+    # Workspace ONE Admin Assistant
+    # -----------------------------------------------------------------------
+    "admin_assistant": ProductConfig(
+        slug="admin_assistant",
+        label="Workspace ONE Admin Assistant",
+        description="Omnissa Workspace ONE Admin Assistant (macOS).",
+        include_keywords=["admin-assistant"],
+        exclude_keywords=list(_NEVER_INGEST),
+        extra_bundles=["Admin-AssistantVSaaS"],
+        skip_versioned_bundles=True,
+        search_prefix="Workspace ONE Admin Assistant",
+        release_notes=ReleaseNotesSource(
+            bundle_exact=[
+                "workspace-one-admin-assistant-for-macos-release-notesVSaaS",
+            ],
+            version_re=r"$nope^",
+        ),
+    ),
+
+    # -----------------------------------------------------------------------
+    # Workspace ONE Email Notification Service (ENS / ENS2)
+    # -----------------------------------------------------------------------
+    "ens": ProductConfig(
+        slug="ens",
+        label="Workspace ONE Email Notification Service",
+        description="Omnissa Workspace ONE Email Notification Service (ENS / ENS2).",
+        include_keywords=["ws1uem_ens", "ws1uemens", "uem_ens"],
+        exclude_keywords=list(_NEVER_INGEST),
+        extra_bundles=["WS1UEM_ENS2_GuideVSaaS"],
+        skip_versioned_bundles=True,
+        search_prefix="Workspace ONE Email Notification Service",
+        release_notes=ReleaseNotesSource(
+            bundle_exact=["WS1UEMENSReleaseNotesVSaaS"],
+            version_re=r"$nope^",
+        ),
+    ),
+
+    # -----------------------------------------------------------------------
+    # Workspace ONE Secure Email Gateway (SEG)
+    # -----------------------------------------------------------------------
+    "seg": ProductConfig(
+        slug="seg",
+        label="Workspace ONE Secure Email Gateway",
+        description="Omnissa Workspace ONE Secure Email Gateway (SEG).",
+        include_keywords=[
+            "secure-email-gateway", "ws1uem-secure-email", "ws1uem_kcd_seg",
+        ],
+        exclude_keywords=list(_NEVER_INGEST),
+        extra_bundles=[
+            "WS1UEM-Secure-Email-GatewayVSaaS",
+            "WS1UEM_KCD_SEGV2VSaaS",
+        ],
+        skip_versioned_bundles=True,
+        search_prefix="Workspace ONE Secure Email Gateway",
+        release_notes=ReleaseNotesSource(
+            bundle_exact=["WS1UEMSEGReleaseNotesVSaaS"],
+            version_re=r"$nope^",
+        ),
+    ),
+
+    # -----------------------------------------------------------------------
+    # Workspace ONE Okta SCIM Provisioning
+    # -----------------------------------------------------------------------
+    "okta_scim": ProductConfig(
+        slug="okta_scim",
+        label="Workspace ONE Okta SCIM Provisioning",
+        description="Omnissa Workspace ONE Okta SCIM provisioning integration.",
+        include_keywords=["okta_scim", "okta-scim"],
+        exclude_keywords=list(_NEVER_INGEST),
+        extra_bundles=["workspaceone_okta_scim_provisioning"],
+        skip_versioned_bundles=True,
+        search_prefix="Workspace ONE Okta SCIM Provisioning",
+        # No dedicated RN bundle visible.
+        release_notes=None,
+    ),
+
+    # -----------------------------------------------------------------------
+    # AirWatch Cloud Connector
+    # -----------------------------------------------------------------------
+    "aw_cloud_connector": ProductConfig(
+        slug="aw_cloud_connector",
+        label="AirWatch Cloud Connector",
+        description=(
+            "Omnissa AirWatch Cloud Connector (ACC) — links cloud UEM to "
+            "on-prem directory and infrastructure services."
+        ),
+        include_keywords=["airwatchcloudconnector"],
+        exclude_keywords=list(_NEVER_INGEST),
+        extra_bundles=["AirWatchCloudConnectorVSaaS"],
+        skip_versioned_bundles=True,
+        search_prefix="AirWatch Cloud Connector",
+        # No dedicated RN bundle visible.
+        release_notes=None,
     ),
 }
 

@@ -96,7 +96,11 @@ def test_new_product_has_release_notes(slug):
 
 
 def test_total_product_count():
-    assert len(PRODUCTS) == 10
+    # 10 first-class products (uem, horizon, horizon_cloud, app_volumes,
+    # uag, dem, thinapp, access, intelligence, identity_service) plus
+    # 10 split-out sub-products (mtd, servicenow, hub_services, xr_hub,
+    # pivd_manager, admin_assistant, ens, seg, okta_scim, aw_cloud_connector).
+    assert len(PRODUCTS) == 20
 
 
 def test_uem_family_allowlist_excludes_access_and_intelligence():
