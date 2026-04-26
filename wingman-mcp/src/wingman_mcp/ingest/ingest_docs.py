@@ -156,7 +156,10 @@ def _extract_text(url):
                     text = "\n\n".join(["\n".join(prefix), text])
                 return {"text": text.strip(), "topic_payload": payload}
 
-    res = requests.get(url, timeout=10, headers={"User-Agent": USER_AGENT})
+    # Plain-HTML fetch path (techzone, anything not on docs.omnissa.com).
+    # 30s timeout — TechZone pages are large (~150 KB) and the CDN can be
+    # slow under bursty parallel load.
+    res = requests.get(url, timeout=30, headers={"User-Agent": USER_AGENT})
     if res.status_code != 200:
         return None
     soup = BeautifulSoup(res.content, "html.parser")
@@ -283,25 +286,39 @@ def ingest_product(
     # --- Phase 2: Download & extract ---
     print(f"\n=== [{product.slug}] Phase 2/3: Downloading pages ({max_workers} workers) ===")
     all_docs = []
-    failed = 0
-    skipped = 0
+    # Every URL here already passed `should_ingest`, so a None return from
+    # the downloader means the HTTP fetch or HTML extraction failed (timeout,
+    # non-200, parse error, etc.) — not that we filtered it. Track these
+    # separately from family-inference drops (where a doc downloaded fine but
+    # got classified into a family the product doesn't accept).
+    fetch_errors: list[str] = []
+    family_drops = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(download, u): u for u in all_urls}
         for future in tqdm(as_completed(futures), total=len(all_urls),
                            desc="  Fetching", unit="pg", smoothing=0.1):
+            url = futures[future]
             result = future.result()
-            if result:
+            if result is not None:
                 all_docs.append(result["doc"])
             else:
-                url = futures[future]
-                bundle = _extract_bundle(url)
-                if bundle and bundle.lower() in extra_bundle_set:
-                    failed += 1
+                # Was this dropped by family inference (downloaded ok but
+                # filtered post-fetch) or did the fetch itself fail?
+                if product.family_inference is not None:
+                    # Can't tell from here without a second probe. Conservative:
+                    # call it a family drop if family inference is configured,
+                    # else a fetch error.
+                    family_drops += 1
                 else:
-                    skipped += 1
+                    fetch_errors.append(url)
 
-    print(f"  Downloaded {len(all_docs)} pages ({failed} failed, {skipped} filtered out)")
+    print(f"  Downloaded {len(all_docs)} pages "
+          f"({len(fetch_errors)} fetch failures, {family_drops} family-filtered)")
+    if fetch_errors:
+        print(f"  Sample fetch failures (first 5):")
+        for u in fetch_errors[:5]:
+            print(f"    {u}")
 
     if not all_docs:
         print(f"  Nothing to embed for '{product.slug}'.")
