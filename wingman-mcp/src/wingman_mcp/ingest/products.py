@@ -331,8 +331,13 @@ PRODUCTS: dict[str, ProductConfig] = {
         allowed_families=_UEM_ALLOWED_FAMILIES,
         search_prefix="Workspace ONE UEM",
         release_notes=ReleaseNotesSource(
+            # docs.omnissa.com bundles like Workspace-ONE-UEM-Release-NotesV2602
+            bundle_prefixes=["Workspace-ONE-UEM-Release-Notes"],
+            # When a local v{version}_rn.txt is present, also run the UEM
+            # txt path (sectioned chunks). The dispatcher runs both paths
+            # for products that configure bundle_prefixes AND uem_txt.
             source_type="uem_txt",
-            version_re=r"v(\d{4})",
+            version_re=r"V(\d{4})",
             section_splitter=_uem_split_by_sections,
         ),
     ),

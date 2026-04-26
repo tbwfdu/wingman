@@ -298,10 +298,15 @@ def ingest_release_notes(
             print(f"  Skip {slug}: no release_notes config")
             continue
         print(f"\n=== Ingesting release notes for {slug} ({cfg.label}) ===")
-        if cfg.release_notes.source_type == "uem_txt":
-            _ingest_uem_txt(cfg, vectorstore, splitter, content_hashes)
-        else:
+        rn = cfg.release_notes
+        # Run docs_web first if bundle prefixes/exacts are configured.
+        # Then run uem_txt second so that — for any version where a local
+        # .txt file is present — its sectioned chunks overwrite the
+        # docs_web chunks for that (product, version) pair.
+        if rn.bundle_prefixes or rn.bundle_exact:
             _ingest_docs_web(cfg, vectorstore, splitter)
+        if rn.source_type == "uem_txt":
+            _ingest_uem_txt(cfg, vectorstore, splitter, content_hashes)
 
     if content_hashes:
         hash_file.write_text(
