@@ -27,12 +27,16 @@ def test_extract_version_yymm():
     assert _extract_version("Horizon-Release-Notes-V2603", rn) == "2603"
 
 
-def test_extract_version_dem_strips_underscores():
+def test_extract_version_dem_yymm():
+    """DEM RN bundles are named DEMReleaseNotesV2603 etc.
+
+    The admin-guide bundles use a different shape (Dynamic-Environment-
+    Manager_<version>_<slug>) but those aren't RN, so they don't go
+    through this extractor.
+    """
     rn = PRODUCTS["dem"].release_notes
-    assert (
-        _extract_version("Dynamic-Environment-Manager_2111.1_AdminGuide", rn)
-        == "2111.1"
-    )
+    assert _extract_version("DEMReleaseNotesV2603", rn) == "2603"
+    assert _extract_version("DEMReleaseNotesV2111.1", rn) == "2111.1"
 
 
 def test_extract_version_access_dotted():

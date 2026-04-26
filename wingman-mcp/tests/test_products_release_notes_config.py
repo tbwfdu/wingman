@@ -57,13 +57,13 @@ def test_uem_uses_txt_source():
     assert cfg.release_notes.section_splitter is not None
 
 
-def test_dem_version_re_strips_underscores():
-    """DEM bundle names look like Dynamic-Environment-Manager_2111.1_..."""
+def test_dem_version_re_matches_rn_bundles():
+    """DEM RN bundles are DEMReleaseNotesV<yymm>."""
     import re
     cfg = PRODUCTS["dem"]
-    m = re.search(cfg.release_notes.version_re, "Dynamic-Environment-Manager_2111.1_AdminGuide")
+    m = re.search(cfg.release_notes.version_re, "DEMReleaseNotesV2603")
     assert m is not None
-    assert m.group(1) == "2111.1"
+    assert m.group(1) == "2603"
 
 
 def test_app_volumes_rn_bundle_prefixes():

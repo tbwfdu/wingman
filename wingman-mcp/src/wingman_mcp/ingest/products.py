@@ -380,7 +380,24 @@ PRODUCTS: dict[str, ProductConfig] = {
         skip_versioned_bundles=True,
         search_prefix="Omnissa Horizon",
         release_notes=ReleaseNotesSource(
-            bundle_prefixes=["Horizon-Release-Notes", "HorizonReleaseNotes"],
+            # Horizon RN bundles on docs.omnissa.com use lowercase hyphenated
+            # names. Covers the core server (horizon8-rn / horizon7-rn),
+            # each client platform (-rn or -RN suffix; Windows uses -RN),
+            # HTML Access, the web client, and the tech-preview client.
+            # Case-insensitive matching handles -RN vs -rn variants.
+            bundle_prefixes=[
+                "horizon8-rn",
+                "horizon7-rn",
+                "horizon-client-android-rn",
+                "horizon-client-chrome-rn",
+                "horizon-client-ios-rn",
+                "horizon-client-linux-rn",
+                "horizon-client-mac-rn",
+                "horizon-client-windows-rn",  # also matches uppercase -RN
+                "horizon-client-tech-preview-rn",
+                "horizon-html-access-rn",
+                "horizon-web-client-rn",
+            ],
         ),
         api=ApiSource(
             spec_url="https://developer.omnissa.com/horizon-apis/horizon-server/versions/2603/rest-api-swagger-docs.json",
@@ -524,9 +541,11 @@ PRODUCTS: dict[str, ProductConfig] = {
         skip_versioned_bundles=True,
         search_prefix="Omnissa Dynamic Environment Manager",
         release_notes=ReleaseNotesSource(
-            bundle_prefixes=["Dynamic-Environment-Manager"],
-            # DEM uses underscore-delimited versions in bundle names.
-            version_re=r"_(\d{4}(?:\.\d+)?)_",
+            # DEM RN bundles are named DEMReleaseNotesV2603, V2509, etc.
+            # Note: the DEM admin-guide bundles use a different shape
+            # (Dynamic-Environment-Manager_2111.1_...) but those aren't RN.
+            bundle_prefixes=["DEMReleaseNotes"],
+            # Default version_re (V<yymm>) works fine for DEM RN bundles.
         ),
     ),
 

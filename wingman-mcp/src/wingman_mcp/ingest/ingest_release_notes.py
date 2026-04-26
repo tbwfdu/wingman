@@ -56,10 +56,18 @@ _SEARCH_DIRS = [
 # ---------------------------------------------------------------------------
 
 def _bundle_matches(bundle: str, rn: ReleaseNotesSource) -> bool:
-    """Return True if `bundle` belongs to this product's release notes."""
-    if bundle in rn.bundle_exact:
+    """Return True if `bundle` belongs to this product's release notes.
+
+    Matching is case-insensitive — Omnissa bundle names are inconsistent
+    on capitalisation (e.g. ``horizon-client-windows-RN`` vs the lowercase
+    siblings on other platforms).
+    """
+    if not bundle:
+        return False
+    lower = bundle.lower()
+    if lower in {b.lower() for b in rn.bundle_exact}:
         return True
-    return any(bundle.startswith(p) for p in rn.bundle_prefixes)
+    return any(lower.startswith(p.lower()) for p in rn.bundle_prefixes)
 
 
 def _extract_version(bundle: str, rn: ReleaseNotesSource) -> str:
