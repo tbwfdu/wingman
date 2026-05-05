@@ -14,6 +14,25 @@ def _keyword_tokens(text: str) -> List[str]:
     return [t for t in re.findall(r"[a-z0-9_/.-]+", (text or "").lower()) if len(t) >= 3]
 
 
+def _expand_version(v: str) -> List[str]:
+    """Expand a user-supplied version into all equivalent stored forms.
+
+    Different products store versions in different forms (Access uses
+    "24.12"; UEM/Horizon use "2412"-style). Users typically don't know
+    which form. This expands the input into a candidate set that covers
+    both, suitable for a Chroma `$in` filter.
+    """
+    v = (v or "").lower().lstrip("v").strip()
+    candidates = {v, v.replace(".", "")}
+    # 4-digit yymm input → add the dotted yy.mm form.
+    if re.fullmatch(r"\d{4}", v):
+        candidates.add(f"{v[:2]}.{v[2:]}")
+    # 5-6 digit input like '250601' → add yy.mm.patch form.
+    if re.fullmatch(r"\d{5,6}", v):
+        candidates.add(f"{v[:2]}.{v[2:4]}.{v[4:]}")
+    return sorted(candidates)
+
+
 def _metadata_text(doc: Any) -> str:
     meta = getattr(doc, "metadata", {}) or {}
     parts = [
@@ -75,6 +94,29 @@ def _format_results(docs: List[Any]) -> List[Dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
+# Generic product documentation search (single-family stores)
+# ---------------------------------------------------------------------------
+
+def search_product_docs(
+    query: str,
+    db: Chroma,
+    search_prefix: str = "",
+    max_results: int = 10,
+) -> List[Dict[str, str]]:
+    """Search a single-product Chroma store (Horizon, App Volumes, etc.).
+
+    Compared to `search_uem`, there is no multi-family scoring — every doc
+    in the store belongs to one product, so we just vector-search, dedup,
+    and return.
+    """
+    search_query = f"{search_prefix} {query}".strip() if search_prefix else query
+    docs = db.similarity_search(search_query, k=max_results * 3)
+    filtered = [d for d in docs if not _is_boilerplate(d)]
+    deduped = _dedup(filtered)
+    return _format_results(deduped[:max_results])
+
+
+# ---------------------------------------------------------------------------
 # UEM Documentation Search
 # ---------------------------------------------------------------------------
 
@@ -110,22 +152,58 @@ def search_uem(query: str, db: Chroma, max_results: int = 10) -> List[Dict[str, 
 # API Reference Search
 # ---------------------------------------------------------------------------
 
-def search_api(query: str, db: Chroma, max_results: int = 10) -> List[Dict[str, str]]:
-    """Search the API endpoint reference store."""
-    search_query = f"Workspace ONE UEM API {query}".strip()
+def search_api(
+    query: str,
+    db: Chroma,
+    product: str = "uem",
+    max_results: int = 10,
+) -> List[Dict[str, str]]:
+    """Search the API endpoint reference store, scoped to one product.
 
-    # Vector search
-    docs = db.similarity_search(search_query, k=max_results * 2, filter={"type": "api_endpoint"})
+    Defaults to product='uem' so existing callers keep working unchanged.
+    """
+    from wingman_mcp.ingest.products import PRODUCTS
 
-    # Lexical fallback if vector search returns nothing
+    if product not in PRODUCTS:
+        return [{
+            "content": f"Unknown product '{product}'. Valid: {', '.join(sorted(PRODUCTS))}",
+            "source_url": "",
+            "source": "wingman-mcp",
+            "section": "error",
+        }]
+
+    cfg = PRODUCTS[product]
+    if product != "uem" and cfg.api is None:
+        return [{
+            "content": (
+                f"{cfg.label} does not have a REST API. "
+                f"Try search_omnissa_docs(product='{product}') for product documentation."
+            ),
+            "source_url": "",
+            "source": "wingman-mcp",
+            "section": "no_api",
+        }]
+
+    search_prefix = cfg.search_prefix or cfg.label
+    search_query = f"{search_prefix} API {query}".strip()
+
+    base_filter = {"$and": [
+        {"product": product},
+        {"type": "api_endpoint"},
+    ]}
+    docs = db.similarity_search(search_query, k=max_results * 2, filter=base_filter)
+
     if not docs:
-        docs = _lexical_api_fallback(db, query, limit=max_results)
+        docs = _lexical_api_fallback(db, query, product=product, limit=max_results)
 
-    # Also get context docs
+    # Pull in api_documentation context (Intelligence's PDF chunks live here).
     context_docs = []
     for doc_type in ("api_documentation", "api_definition"):
         try:
-            context_docs.extend(db.similarity_search(search_query, k=6, filter={"type": doc_type}))
+            context_docs.extend(db.similarity_search(
+                search_query, k=6,
+                filter={"$and": [{"product": product}, {"type": doc_type}]},
+            ))
         except Exception:
             pass
 
@@ -133,7 +211,6 @@ def search_api(query: str, db: Chroma, max_results: int = 10) -> List[Dict[str, 
     filtered = [d for d in combined if not _is_boilerplate(d)]
     deduped = _dedup(filtered)
 
-    # Score: prefer api_endpoint type
     def score(doc):
         meta = getattr(doc, "metadata", {}) or {}
         s = 0
@@ -147,13 +224,21 @@ def search_api(query: str, db: Chroma, max_results: int = 10) -> List[Dict[str, 
     return _format_results(deduped[:max_results])
 
 
-def _lexical_api_fallback(db: Chroma, query: str, limit: int = 8) -> List[Any]:
+def _lexical_api_fallback(
+    db: Chroma,
+    query: str,
+    product: str = "uem",
+    limit: int = 8,
+) -> List[Any]:
     token_set = set(_keyword_tokens(query))
     if not token_set:
         return []
 
     try:
-        payload = db.get(where={"type": "api_endpoint"})
+        payload = db.get(where={"$and": [
+            {"product": product},
+            {"type": "api_endpoint"},
+        ]})
     except Exception:
         return []
 
@@ -197,42 +282,68 @@ def search_release_notes(
     query: str,
     db: Chroma,
     version: Optional[str] = None,
+    product: str = "uem",
     max_results: int = 15,
 ) -> List[Dict[str, str]]:
-    """Search the release notes store with optional version filter."""
+    """Search the combined release-notes store, scoped to one product.
+
+    Defaults to product='uem' so existing callers keep working unchanged.
+    Component-focused multi-pass search (Windows / macOS / etc.) only fires
+    for UEM, since those headings are UEM-specific.
+    """
+    from wingman_mcp.ingest.products import PRODUCTS
+
+    if product not in PRODUCTS:
+        return [{
+            "content": f"Unknown product '{product}'. Valid: {', '.join(sorted(PRODUCTS))}",
+            "source_url": "",
+            "source": "wingman-mcp",
+            "section": "error",
+        }]
+
+    cfg = PRODUCTS[product]
+    search_prefix = cfg.search_prefix or cfg.label
     docs: List[Any] = []
 
-    # Normalize version input
+    # Build version filter (with normalization expansion).
+    version_clause = None
     if version:
-        version = version.replace("v", "").strip()
+        version_clause = {"version": {"$in": _expand_version(version)}}
 
-    # Version-specific search
-    if version:
-        v_filter = {"$and": [{"version": version}, {"type": "release_notes"}]}
-        docs.extend(db.similarity_search(query, k=max_results, filter=v_filter))
+    base_filter: Dict[str, Any] = {
+        "$and": [
+            {"product": product},
+            {"type": "release_notes"},
+        ],
+    }
+    if version_clause:
+        base_filter["$and"].append(version_clause)
 
-        # Component-focused searches for richer results
+    # Primary search.
+    docs.extend(db.similarity_search(query, k=max_results * 2, filter=base_filter))
+
+    # UEM-only: component-focused multi-pass (preserves existing behaviour).
+    if product == "uem" and version:
         for label in COMPONENT_LABELS.values():
-            focus_query = f"Workspace ONE UEM {label} updates release notes"
-            docs.extend(db.similarity_search(focus_query, k=5, filter=v_filter))
-    else:
-        # Search across all versions
-        docs.extend(db.similarity_search(query, k=max_results * 2, filter={"type": "release_notes"}))
+            focus_query = f"{search_prefix} {label} updates release notes"
+            docs.extend(db.similarity_search(focus_query, k=5, filter=base_filter))
 
     filtered = [d for d in docs if not _is_boilerplate(d)]
     deduped = _dedup(filtered)
 
-    # Score: prefer matching version, recency
+    # Score: prefer matching version, then recency.
+    expanded_versions = set(_expand_version(version)) if version else set()
+
     def score(doc):
         meta = getattr(doc, "metadata", {}) or {}
         s = 0
-        if version and meta.get("version") == version:
-            s += 50
-        # Newer versions score higher
         v = meta.get("version", "")
-        if v:
+        if version and v in expanded_versions:
+            s += 50
+        # Numeric-version recency boost (only meaningful for yymm-style).
+        if v and v != "rolling":
             try:
-                s += int(v)  # e.g. 2602 > 2509 > 2506
+                s += int(v.replace(".", ""))
             except ValueError:
                 pass
         return s

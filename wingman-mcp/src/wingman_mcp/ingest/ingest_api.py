@@ -76,6 +76,8 @@ Tags: {tags}"""
                     docs.append(Document(
                         page_content=content.strip(),
                         metadata={
+                            "product": "uem",
+                            "product_label": "Workspace ONE UEM",
                             "source": safe_source,
                             "full_url": safe_full_path,
                             "path": path,
@@ -97,3 +99,137 @@ Tags: {tags}"""
 
         except Exception as e:
             print(f"  Error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Multi-product OpenAPI walker (Plan 2)
+# ---------------------------------------------------------------------------
+
+_HTTP_METHODS = {"get", "post", "put", "delete", "patch", "head", "options", "trace"}
+
+
+def _resolve_base_url(spec: dict) -> str:
+    """Resolve the API base URL from an OpenAPI 2 or 3 document."""
+    # OpenAPI 3 — `servers[0].url`
+    servers = spec.get("servers")
+    if servers and isinstance(servers, list):
+        url = (servers[0] or {}).get("url") or ""
+        return url.rstrip("/")
+    # Swagger 2 — schemes + host + basePath
+    schemes = spec.get("schemes") or []
+    host = spec.get("host") or ""
+    basepath = (spec.get("basePath") or "").rstrip("/")
+    if host:
+        scheme = (schemes[0] if schemes else "https")
+        return f"{scheme}://{host}{basepath}"
+    return ""
+
+
+def _walk_openapi(spec: dict, product: str, api_group: str,
+                  source_url: str = "", version: str | None = None) -> list[Document]:
+    """Walk an OpenAPI 2 or 3 document; emit one Document per (method, path) tuple."""
+    from wingman_mcp.ingest.products import PRODUCTS
+    label = PRODUCTS[product].label if product in PRODUCTS else product
+    base = _resolve_base_url(spec)
+    docs: list[Document] = []
+    for path, methods in (spec.get("paths") or {}).items():
+        if not isinstance(methods, dict):
+            continue
+        for method, op in methods.items():
+            if method.lower() not in _HTTP_METHODS or not isinstance(op, dict):
+                continue
+            full_url = f"{base}{path}" if base else path
+            summary = op.get("summary", "") or ""
+            description = op.get("description", "") or ""
+            operation_id = op.get("operationId", "") or ""
+            tags = ", ".join(op.get("tags", []) or [])
+            content = (
+                f"{label} API Endpoint\n"
+                f"Category: {api_group}\n"
+                f"Full URL: {full_url}\n"
+                f"Path: {path}\n"
+                f"Method: {method.upper()}\n"
+                f"Summary: {summary}\n"
+                f"Description: {description}\n"
+                f"OperationId: {operation_id}\n"
+                f"Tags: {tags}"
+            )
+            docs.append(Document(
+                page_content=content.strip(),
+                metadata={
+                    "product": product,
+                    "product_label": label,
+                    "source": source_url,
+                    "full_url": full_url,
+                    "path": path,
+                    "method": method.upper(),
+                    "type": "api_endpoint",
+                    "api_group": api_group,
+                    "version": version or "rolling",
+                },
+            ))
+    return docs
+
+
+def _fetch_spec(url: str, fmt: str) -> dict:
+    """Fetch and parse an OpenAPI spec from a URL."""
+    res = requests.get(url, timeout=30, headers={"User-Agent": "WingmanMCP/1.0"})
+    res.raise_for_status()
+    if fmt == "openapi_json":
+        return res.json()
+    elif fmt == "openapi_yaml":
+        import yaml
+        return yaml.safe_load(res.text)
+    raise ValueError(f"Unsupported spec format: {fmt}")
+
+
+def ingest_api_for_product(slug: str, store_dir: str, embeddings):
+    """Ingest one product's API spec into the combined `api` store."""
+    from wingman_mcp.ingest.products import PRODUCTS
+
+    cfg = PRODUCTS.get(slug)
+    if cfg is None:
+        raise ValueError(f"Unknown product: {slug}")
+    if cfg.api is None:
+        print(f"  {slug} has no api config — skipping.")
+        return
+
+    os.makedirs(store_dir, exist_ok=True)
+    vectorstore = Chroma(persist_directory=store_dir, embedding_function=embeddings)
+
+    print(f"\n=== Ingesting API for {slug} from {cfg.api.spec_url} ===")
+
+    if cfg.api.spec_format == "pdf":
+        # Defer to ingest_api_pdf — keeps PDF concerns isolated.
+        from wingman_mcp.ingest.ingest_api_pdf import ingest_pdf_api
+        ingest_pdf_api(cfg, vectorstore)
+        return
+
+    try:
+        spec = _fetch_spec(cfg.api.spec_url, cfg.api.spec_format)
+    except Exception as e:
+        print(f"  Failed to fetch/parse spec: {e}")
+        return
+
+    docs = _walk_openapi(
+        spec,
+        product=slug,
+        api_group=cfg.api.api_group,
+        source_url=cfg.api.spec_url,
+        version=cfg.api.version,
+    )
+    if not docs:
+        print(f"  No paths found in {slug} spec.")
+        return
+
+    # Idempotent: drop existing chunks for this product before adding.
+    try:
+        existing = vectorstore.get(where={"product": slug})
+        existing_ids = existing.get("ids", [])
+        if existing_ids:
+            vectorstore.delete(ids=existing_ids)
+    except Exception as e:
+        print(f"  ({slug}) cleanup skipped: {e}")
+
+    vectorstore.add_documents(docs)
+    print(f"  Added {len(docs)} endpoints for {slug}.")
