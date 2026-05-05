@@ -1,20 +1,30 @@
 """MCP server exposing Workspace ONE UEM documentation search tools."""
+import hashlib
 import json
-from typing import Any
+from typing import Any, Optional
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from wingman_mcp.config import get_store_dir, stores_exist, STORE_KEYS
-from wingman_mcp.search import search_uem, search_api, search_release_notes
+from wingman_mcp.search import (
+    search_uem, search_api, search_release_notes, search_product_docs,
+)
 
 app = Server("wingman-mcp")
 
 # Lazy-loaded stores and auth
 _stores: dict[str, Any] = {}
 _embeddings = None
-_auths: dict[str, Any] = {}  # keyed by environment name
+# UEM auth cache.
+# In local/stdio mode: keyed by environment name.
+# In HTTP mode: keyed by SHA-256 of credential values (so different users get
+# separate UEMAuth instances with their own token caches).
+_auths: dict[str, Any] = {}
+
+# Non-UEM product API client cache, keyed by (product, env_name).
+_product_clients: dict[tuple[str, str], Any] = {}
 
 
 def _get_embeddings():
@@ -26,7 +36,29 @@ def _get_embeddings():
 
 
 def _get_auth(env_name: str = "default"):
-    """Return a UEMAuth instance for the given environment, or None."""
+    """Return a UEMAuth instance or None.
+
+    In HTTP server mode, credentials come from the per-request ContextVar set
+    by CredentialHeaderMiddleware.  In local stdio mode, credentials are loaded
+    from the OS keychain / config file as usual.
+    """
+    from wingman_mcp.request_context import _is_http_request, _request_credentials
+
+    if _is_http_request.get():
+        creds = _request_credentials.get()
+        if creds is None:
+            return None
+        # Cache UEMAuth by a fingerprint of the credentials so that repeated
+        # calls within the same process reuse the token cache.
+        fingerprint = hashlib.sha256(
+            f"{creds['client_id']}:{creds['client_secret']}:{creds['token_url']}:{creds['api_base_url']}".encode()
+        ).hexdigest()
+        if fingerprint not in _auths:
+            from wingman_mcp.auth import UEMAuth
+            _auths[fingerprint] = UEMAuth(creds)
+        return _auths[fingerprint]
+
+    # Local/stdio mode: load from OS keychain + config file.
     if env_name not in _auths:
         from wingman_mcp.credentials import load_credentials
         creds = load_credentials(env_name)
@@ -75,17 +107,29 @@ TOOLS = [
     Tool(
         name="search_api_reference",
         description=(
-            "Search Workspace ONE UEM REST API endpoint documentation. "
-            "Covers MDM, MAM, MCM, MEM, and System API groups. "
-            "Returns endpoint details: method, path, summary, parameters. "
-            "Use this when the user asks about API calls, endpoints, or programmatic access."
+            "Search Omnissa REST API endpoint documentation. "
+            "Supports product filter (default: 'uem'). Valid products: "
+            "uem, horizon, horizon_cloud, app_volumes, uag, access, "
+            "intelligence, identity_service. (DEM and ThinApp have no API.) "
+            "For UEM covers MDM/MAM/MCM/MEM/System groups; for others "
+            "returns method, path, summary, parameters from the product's "
+            "OpenAPI spec on developer.omnissa.com."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search query about UEM APIs (e.g. 'enroll device', 'GET profiles')",
+                    "description": "Search query about REST APIs (e.g. 'enroll device', 'GET profiles')",
+                },
+                "product": {
+                    "type": "string",
+                    "description": (
+                        "Product slug. Default: 'uem'. One of: uem, horizon, "
+                        "horizon_cloud, app_volumes, uag, access, intelligence, "
+                        "identity_service."
+                    ),
+                    "default": "uem",
                 },
                 "max_results": {
                     "type": "integer",
@@ -97,12 +141,66 @@ TOOLS = [
         },
     ),
     Tool(
+        name="search_omnissa_docs",
+        description=(
+            "Search Omnissa product documentation for a specific product. "
+            "Covers Horizon, Horizon Cloud, App Volumes, Unified Access "
+            "Gateway, ThinApp, Dynamic Environment Manager, Workspace ONE "
+            "UEM, Workspace ONE Access, Intelligence, Omnissa Identity "
+            "Service, the WS1 sub-products (MTD, ServiceNow, Hub Services, "
+            "XR Hub, PIV-D Manager, Admin Assistant, ENS, SEG, Okta SCIM, "
+            "AirWatch Cloud Connector), and Omnissa TechZone.\n\n"
+            "When to pick which product:\n"
+            "  - product='techzone' for 'how do I X?', 'what's the best way "
+            "    to Y?', design / reference architecture / tutorial / "
+            "    deployment-pattern questions that span products. TechZone "
+            "    is curated reference content, not config reference.\n"
+            "  - product='<specific>' for product-specific configuration, "
+            "    admin console settings, payload reference, troubleshooting.\n"
+            "  - For a Workspace ONE UEM question, prefer 'search_uem_docs' "
+            "    which has tuned multi-family scoring; this tool is the "
+            "    fallback for everything else.\n\n"
+            "Run 'wingman-mcp ingest --list' on the host to see which "
+            "product stores have been built — only built stores can be "
+            "searched."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "product": {
+                    "type": "string",
+                    "description": (
+                        "Product slug. One of: uem, horizon, horizon_cloud, "
+                        "app_volumes, uag, thinapp, dem, access, intelligence, "
+                        "identity_service, mtd, servicenow, hub_services, "
+                        "xr_hub, pivd_manager, admin_assistant, ens, seg, "
+                        "okta_scim, aw_cloud_connector, techzone."
+                    ),
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Natural language search query for the chosen product",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum results to return (default: 10)",
+                    "default": 10,
+                },
+            },
+            "required": ["product", "query"],
+        },
+    ),
+    Tool(
         name="search_release_notes",
         description=(
-            "Search Workspace ONE UEM release notes for feature changes, "
-            "bug fixes, resolved issues, and new capabilities across versions. "
-            "Supports version filtering (e.g. '2602', '2509', '2506'). "
-            "Use this when the user asks about what's new, version changes, or resolved issues."
+            "Search Omnissa product release notes for feature changes, "
+            "bug fixes, resolved issues, and new capabilities. "
+            "Supports product filter (default: 'uem'). Valid products: "
+            "uem, horizon, horizon_cloud, app_volumes, uag, dem, thinapp, "
+            "access, intelligence, identity_service. "
+            "Supports version filter where applicable (e.g. UEM '2602', "
+            "Horizon '2603', Access '24.12'). Version input is normalized: "
+            "'2412' and '24.12' match the same Access bundle."
         ),
         inputSchema={
             "type": "object",
@@ -111,9 +209,21 @@ TOOLS = [
                     "type": "string",
                     "description": "Search query about release notes or version changes",
                 },
+                "product": {
+                    "type": "string",
+                    "description": (
+                        "Product slug. Default: 'uem'. One of: uem, horizon, "
+                        "horizon_cloud, app_volumes, uag, dem, thinapp, access, "
+                        "intelligence, identity_service."
+                    ),
+                    "default": "uem",
+                },
                 "version": {
                     "type": "string",
-                    "description": "Optional version filter (e.g. '2602', '2509', '2506')",
+                    "description": (
+                        "Optional version filter. Examples: UEM '2602', Horizon "
+                        "'2603', Access '24.12' (or '2412' — both match)."
+                    ),
                 },
                 "max_results": {
                     "type": "integer",
@@ -807,6 +917,656 @@ TOOLS = [
             "required": ["source_env", "dest_env", "source_og_id", "dest_og_id"],
         },
     ),
+    # -----------------------------------------------------------------------
+    # App Volumes API tools (require auth via 'wingman-mcp auth set --product app_volumes')
+    # -----------------------------------------------------------------------
+    Tool(
+        name="app_volumes_search_applications",
+        description=(
+            "Search Applications in App Volumes Manager. An Application is a "
+            "top-level product that contains one or more Packages. "
+            "Requires App Volumes credentials configured via "
+            "'wingman-mcp auth set --product app_volumes'."
+        ),
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    ),
+    Tool(
+        name="app_volumes_get_application",
+        description="Get details of an App Volumes Application by its ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "app_id": {"type": "string", "description": "Numeric Application ID"},
+            },
+            "required": ["app_id"],
+        },
+    ),
+    Tool(
+        name="app_volumes_search_packages",
+        description=(
+            "Search Packages in App Volumes Manager. A Package is the actual "
+            "delivery payload (a virtual disk) attached to one Application."
+        ),
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    ),
+    Tool(
+        name="app_volumes_get_package",
+        description="Get details of an App Volumes Package by its ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "package_id": {"type": "string", "description": "Numeric Package ID"},
+            },
+            "required": ["package_id"],
+        },
+    ),
+    Tool(
+        name="app_volumes_search_writable_volumes",
+        description=(
+            "Search Writable Volumes in App Volumes Manager. "
+            "Filters: volume_guid, user_guid, owner_name, "
+            "created_after / updated_after (ISO 8601), "
+            "min_capacity / max_capacity (MB), count."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "volume_guid": {"type": "string"},
+                "user_guid": {"type": "string"},
+                "owner_name": {"type": "string"},
+                "created_after": {"type": "string", "description": "ISO 8601 datetime"},
+                "updated_after": {"type": "string", "description": "ISO 8601 datetime"},
+                "min_capacity": {"type": "integer", "description": "Minimum capacity (MB)"},
+                "max_capacity": {"type": "integer", "description": "Maximum capacity (MB)"},
+                "count": {"type": "integer", "description": "Limit results"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="app_volumes_get_writable_volume",
+        description="Get an App Volumes Writable Volume by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "writable_id": {"type": "string", "description": "Numeric Writable Volume ID"},
+            },
+            "required": ["writable_id"],
+        },
+    ),
+    Tool(
+        name="app_volumes_grow_writable_volume",
+        description=(
+            "Increase the size of one or more Writable Volumes. "
+            "Mutation — non-destructive but irreversible. Pass the volume IDs "
+            "to grow and the new size in MB (must exceed current size)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "writable_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "IDs of the Writable Volumes to grow",
+                },
+                "size_mb": {
+                    "type": "integer",
+                    "description": "New size in MB (must exceed current size)",
+                },
+            },
+            "required": ["writable_ids", "size_mb"],
+        },
+    ),
+    # -----------------------------------------------------------------------
+    # Horizon API tools (require auth via 'wingman-mcp auth set --product horizon')
+    # -----------------------------------------------------------------------
+    Tool(
+        name="horizon_search_desktop_pools",
+        description=(
+            "List Desktop Pools in a Horizon environment. Supports paging "
+            "(page, size) and server-side filter/sort_by/order_by. "
+            "Requires Horizon credentials configured via "
+            "'wingman-mcp auth set --product horizon'."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer", "description": "Page size"},
+                "filter": {"type": "string", "description": "Horizon filter expression (JSON)"},
+                "sort_by": {"type": "string"},
+                "order_by": {"type": "string", "description": "ASCENDING or DESCENDING"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_get_desktop_pool",
+        description="Get full details of a Horizon Desktop Pool by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {"pool_id": {"type": "string"}},
+            "required": ["pool_id"],
+        },
+    ),
+    Tool(
+        name="horizon_search_farms",
+        description=(
+            "List Farms (RDSH) in a Horizon environment. "
+            "Supports page/size/filter/sort_by/order_by."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "filter": {"type": "string"},
+                "sort_by": {"type": "string"},
+                "order_by": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_get_farm",
+        description="Get full details of a Horizon Farm by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {"farm_id": {"type": "string"}},
+            "required": ["farm_id"],
+        },
+    ),
+    Tool(
+        name="horizon_search_machines",
+        description=(
+            "List Machines (VMs) in a Horizon environment. "
+            "Supports page/size/filter/sort_by/order_by."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "filter": {"type": "string"},
+                "sort_by": {"type": "string"},
+                "order_by": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_get_machine",
+        description="Get full details of a Horizon Machine (VM) by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {"machine_id": {"type": "string"}},
+            "required": ["machine_id"],
+        },
+    ),
+    Tool(
+        name="horizon_search_sessions",
+        description=(
+            "List active and disconnected user Sessions in a Horizon environment "
+            "(uses the v8 endpoint — latest schema). "
+            "Supports page/size/filter/sort_by/order_by."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "filter": {"type": "string"},
+                "sort_by": {"type": "string"},
+                "order_by": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_get_session",
+        description="Get full details of a Horizon Session by ID (v8).",
+        inputSchema={
+            "type": "object",
+            "properties": {"session_id": {"type": "string"}},
+            "required": ["session_id"],
+        },
+    ),
+    Tool(
+        name="horizon_disconnect_sessions",
+        description=(
+            "Disconnect one or more locally-resourced user sessions (mutation). "
+            "Disconnect leaves applications running so users can resume — for a "
+            "full sign-out, use the Horizon admin console."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Session IDs to disconnect",
+                },
+            },
+            "required": ["session_ids"],
+        },
+    ),
+    Tool(
+        name="horizon_restart_machines",
+        description=(
+            "Restart (reboot) one or more Horizon machines (mutation). "
+            "By default the action is rejected if any machine has open "
+            "sessions; pass force_operation=true to restart anyway."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "machine_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Machine IDs to restart",
+                },
+                "force_operation": {
+                    "type": "boolean",
+                    "description": "Force restart even with active sessions",
+                    "default": False,
+                },
+            },
+            "required": ["machine_ids"],
+        },
+    ),
+    # -----------------------------------------------------------------------
+    # Identity Service API tools
+    # (require auth via 'wingman-mcp auth set --product identity_service')
+    # -----------------------------------------------------------------------
+    Tool(
+        name="identity_service_search_users",
+        description=(
+            "Search SCIM 2.0 users in an Omnissa Identity Service tenant. "
+            "Supports SCIM filter syntax (e.g. filter='userName eq \"alice@x.com\"'), "
+            "startIndex/count paging, and sortBy/sortOrder."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "filter": {"type": "string", "description": "SCIM filter expression"},
+                "sortBy": {"type": "string"},
+                "sortOrder": {"type": "string", "description": "ascending or descending"},
+                "startIndex": {"type": "integer", "description": "1-based page start"},
+                "count": {"type": "integer", "description": "Page size"},
+                "attributes": {"type": "string", "description": "Comma list of attrs to return"},
+                "excludedAttributes": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="identity_service_get_user",
+        description="Get a SCIM user by ID from an Omnissa Identity Service tenant.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string"},
+                "attributes": {"type": "string"},
+                "excludedAttributes": {"type": "string"},
+            },
+            "required": ["user_id"],
+        },
+    ),
+    Tool(
+        name="identity_service_search_groups",
+        description="Search SCIM 2.0 groups in an Omnissa Identity Service tenant.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "filter": {"type": "string"},
+                "sortBy": {"type": "string"},
+                "sortOrder": {"type": "string"},
+                "startIndex": {"type": "integer"},
+                "count": {"type": "integer"},
+                "attributes": {"type": "string"},
+                "excludedAttributes": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="identity_service_get_group",
+        description="Get a SCIM group by ID from an Omnissa Identity Service tenant.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "group_id": {"type": "string"},
+                "attributes": {"type": "string"},
+                "excludedAttributes": {"type": "string"},
+            },
+            "required": ["group_id"],
+        },
+    ),
+    Tool(
+        name="identity_service_search_directories",
+        description="List the user directories configured in an Identity Service tenant.",
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    ),
+    Tool(
+        name="identity_service_get_directory",
+        description="Get a directory configuration by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {"directory_id": {"type": "string"}},
+            "required": ["directory_id"],
+        },
+    ),
+    Tool(
+        name="identity_service_create_user",
+        description=(
+            "Create a SCIM 2.0 user in an Omnissa Identity Service tenant (mutation). "
+            "Pass the full SCIM user resource — at minimum `schemas`, `userName`, and "
+            "`name`/`emails`. The directory the user lands in is determined by the "
+            "client's authorization scope."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "user_resource": {
+                    "type": "object",
+                    "description": "Full SCIM 2.0 User resource (schemas, userName, name, emails, etc.)",
+                },
+            },
+            "required": ["user_resource"],
+        },
+    ),
+    # -----------------------------------------------------------------------
+    # Workspace ONE Access API tools
+    # (require auth via 'wingman-mcp auth set --product access')
+    # -----------------------------------------------------------------------
+    Tool(
+        name="access_search_users",
+        description=(
+            "Search SCIM users in a Workspace ONE Access tenant. Supports SCIM "
+            "filter, startIndex/count paging, sortBy/sortOrder, attributes."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "filter": {"type": "string"},
+                "sortBy": {"type": "string"},
+                "sortOrder": {"type": "string"},
+                "startIndex": {"type": "integer"},
+                "count": {"type": "integer"},
+                "attributes": {"type": "string"},
+                "customSchemaExtensionTypes": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="access_get_user",
+        description="Get a SCIM user by ID from a Workspace ONE Access tenant.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string"},
+                "attributes": {"type": "string"},
+                "directoryUuid": {"type": "string"},
+            },
+            "required": ["user_id"],
+        },
+    ),
+    Tool(
+        name="access_search_groups",
+        description="Search SCIM groups in a Workspace ONE Access tenant.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "filter": {"type": "string"},
+                "sortBy": {"type": "string"},
+                "sortOrder": {"type": "string"},
+                "startIndex": {"type": "integer"},
+                "count": {"type": "integer"},
+                "attributes": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="access_get_group",
+        description="Get a SCIM group by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "group_id": {"type": "string"},
+                "attributes": {"type": "string"},
+            },
+            "required": ["group_id"],
+        },
+    ),
+    Tool(
+        name="access_search_entitlements",
+        description=(
+            "Search entitlements (catalog items) in a Workspace ONE Access tenant. "
+            "Pass userId to scope to one user, or omit for the authenticated client. "
+            "criteria is a SearchCriteria body (pass {} for unrestricted)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "userId": {"type": "string"},
+                "showVisibleAppsOnly": {"type": "boolean"},
+                "startIndex": {"type": "integer"},
+                "pageSize": {"type": "integer"},
+                "criteria": {
+                    "type": "object",
+                    "description": "SearchCriteria body. Pass {} for 'no filter'.",
+                },
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="access_get_activity_summary_report",
+        description=(
+            "Get the activity summary report for a time interval. "
+            "interval values are tenant-version-specific (e.g. 'day', 'week', "
+            "'month'); use search_api_reference --product access if unsure."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "interval": {"type": "string"},
+            },
+            "required": ["interval"],
+        },
+    ),
+    Tool(
+        name="access_create_user",
+        description=(
+            "Create a local user in a Workspace ONE Access tenant (mutation). "
+            "user_resource follows the SdkUserResource schema. sendMail=true "
+            "triggers a password-setup email."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "user_resource": {
+                    "type": "object",
+                    "description": "Full SCIM/SDK user resource.",
+                },
+                "sendMail": {"type": "boolean"},
+                "attributes": {"type": "string"},
+            },
+            "required": ["user_resource"],
+        },
+    ),
+    # -----------------------------------------------------------------------
+    # Horizon Cloud Service (Next-Gen) API tools — read-only
+    # (require auth via 'wingman-mcp auth set --product horizon_cloud')
+    # -----------------------------------------------------------------------
+    Tool(
+        name="horizon_cloud_search_pools",
+        description=(
+            "List pool groups in a Horizon Cloud tenant. "
+            "Filters: page, size, sort, search, sort_by_used_sessions, "
+            "sort_by_consumed_sessions, include_internal_pools, "
+            "exclude_disabled_pools, include_deleting_pools. "
+            "org_id is auto-attached from the configured credentials."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "search": {"type": "string"},
+                "sort_by_used_sessions": {"type": "boolean"},
+                "sort_by_consumed_sessions": {"type": "boolean"},
+                "include_internal_pools": {"type": "boolean"},
+                "exclude_disabled_pools": {"type": "boolean"},
+                "include_deleting_pools": {"type": "boolean"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_get_pool",
+        description="Get a Horizon Cloud pool group by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {"pool_id": {"type": "string"}},
+            "required": ["pool_id"],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_templates",
+        description=(
+            "List templates (golden images) in a Horizon Cloud tenant. "
+            "Filters: brokerable_only, expanded, page, size, sort, "
+            "template_search, reported_search."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "brokerable_only": {"type": "boolean"},
+                "expanded": {"type": "boolean"},
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "template_search": {"type": "string"},
+                "reported_search": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_get_template",
+        description="Get a Horizon Cloud template by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "template_id": {"type": "string"},
+                "expanded": {"type": "boolean"},
+            },
+            "required": ["template_id"],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_sessions",
+        description=(
+            "List active user sessions across pools. Filters: userId, "
+            "excludeAssigned. Pass userId to scope to one user."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "userId": {"type": "string"},
+                "excludeAssigned": {"type": "boolean"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_edge_deployments",
+        description=(
+            "List Edge deployments (per-site control plane) for a Horizon "
+            "Cloud tenant. Filters: page, size, sort, search, "
+            "include_reported_status."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "search": {"type": "string"},
+                "include_reported_status": {"type": "boolean"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_get_edge_deployment",
+        description="Get a Horizon Cloud Edge deployment by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "edge_id": {"type": "string"},
+                "include_reported_status": {"type": "boolean"},
+            },
+            "required": ["edge_id"],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_active_directories",
+        description=(
+            "List configured Active Directory / domain integrations. "
+            "Filters: expanded, page, size, sort, search."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "expanded": {"type": "boolean"},
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "search": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_uag_deployments",
+        description=(
+            "List UAG (Unified Access Gateway) deployments associated with "
+            "the Horizon Cloud tenant. Filters: page, size, sort, search."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "search": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="horizon_cloud_search_sso_configurations",
+        description=(
+            "List SSO / identity-provider configurations for the Horizon "
+            "Cloud tenant. Filters: expanded, page, size, sort, search."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "expanded": {"type": "boolean"},
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "sort": {"type": "string"},
+                "search": {"type": "string"},
+            },
+            "required": [],
+        },
+    ),
 ]
 
 # Inject 'env' parameter into all UEM API tool schemas (except uem_list_environments)
@@ -822,8 +1582,12 @@ _ENV_PROPERTY = {
 _SKIP_ENV_INJECTION = {"uem_list_environments", "uem_migrate_scripts",
                        "uem_migrate_sensors", "uem_migrate_profiles",
                        "uem_migrate_apps"}
+# Tool-name prefixes that get the per-product `env` parameter injected.
+_PRODUCT_TOOL_PREFIXES = ("uem_", "app_volumes_", "horizon_", "horizon_cloud_",
+                           "identity_service_", "access_")
 for _tool in TOOLS:
-    if _tool.name.startswith("uem_") and _tool.name not in _SKIP_ENV_INJECTION:
+    if (any(_tool.name.startswith(p) for p in _PRODUCT_TOOL_PREFIXES)
+            and _tool.name not in _SKIP_ENV_INJECTION):
         _tool.inputSchema["properties"].update(_ENV_PROPERTY)
 
 
@@ -836,12 +1600,148 @@ def _require_auth(env_name: str = "default") -> "UEMAuth":
     """Return a UEMAuth instance or raise with a user-friendly message."""
     auth = _get_auth(env_name)
     if auth is None:
+        from wingman_mcp.request_context import _is_http_request
+        if _is_http_request.get():
+            raise RuntimeError(
+                "UEM API credentials not provided. Add the following headers to your "
+                "MCP server configuration: X-UEM-Client-ID, X-UEM-Client-Secret, "
+                "X-UEM-Token-URL, X-UEM-API-URL."
+            )
         raise RuntimeError(
             f"UEM API credentials are not configured for environment '{env_name}'. "
             f"Run 'wingman-mcp auth set --env {env_name}' to provide your Client ID, "
             "Client Secret, Token URL, and API Base URL."
         )
     return auth
+
+
+# ---------------------------------------------------------------------------
+# Per-product (non-UEM) tool dispatch
+# ---------------------------------------------------------------------------
+
+# Each entry: tool_name → (product_slug, function, positional_keys)
+_PRODUCT_API_TOOLS: dict[str, tuple[str, Any, Optional[list[str]]]] = {}
+
+
+def _build_product_client(product: str, env_name: str):
+    """Construct a product API client from stored credentials.
+
+    Returns the client or raises RuntimeError with a user-friendly message.
+    """
+    from wingman_mcp.credentials import load_product_credentials
+
+    creds = load_product_credentials(product, env_name)
+    if creds is None:
+        raise RuntimeError(
+            f"{product} credentials are not configured for environment "
+            f"'{env_name}'. Run 'wingman-mcp auth set --product {product} "
+            f"--env {env_name}' to provide them."
+        )
+    if product == "app_volumes":
+        from wingman_mcp.app_volumes_api import AppVolumesClient
+        return AppVolumesClient(
+            manager_url=creds["manager_url"],
+            username=creds["username"],
+            password=creds["password"],
+        )
+    if product == "horizon":
+        from wingman_mcp.horizon_api import HorizonClient
+        return HorizonClient(
+            server_url=creds["server_url"],
+            username=creds["username"],
+            password=creds["password"],
+            domain=creds["domain"],
+        )
+    if product == "identity_service":
+        from wingman_mcp.identity_service_api import IdentityServiceClient
+        return IdentityServiceClient(
+            tenant_url=creds["tenant_url"],
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+            token_url=creds.get("token_url") or None,
+        )
+    if product == "access":
+        from wingman_mcp.access_api import AccessClient
+        return AccessClient(
+            tenant_url=creds["tenant_url"],
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+            token_url=creds.get("token_url") or None,
+        )
+    if product == "horizon_cloud":
+        from wingman_mcp.horizon_cloud_api import HorizonCloudClient
+        return HorizonCloudClient(
+            api_base_url=creds["api_base_url"],
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+            org_id=creds["org_id"],
+        )
+    raise RuntimeError(f"No client implementation registered for product '{product}'.")
+
+
+def _get_product_client(product: str, env_name: str = "default"):
+    key = (product, env_name)
+    if key not in _product_clients:
+        _product_clients[key] = _build_product_client(product, env_name)
+    return _product_clients[key]
+
+
+def _register_product_api_tools() -> None:
+    """Build the dispatch table for non-UEM product API tools."""
+    from wingman_mcp import app_volumes_api as av
+    from wingman_mcp import horizon_api as hz
+    from wingman_mcp import identity_service_api as ids
+    from wingman_mcp import access_api as acc
+    from wingman_mcp import horizon_cloud_api as hc
+
+    _PRODUCT_API_TOOLS.update({
+        # App Volumes
+        "app_volumes_search_applications":     ("app_volumes", av.search_applications, None),
+        "app_volumes_get_application":         ("app_volumes", av.get_application, ["app_id"]),
+        "app_volumes_search_packages":         ("app_volumes", av.search_packages, None),
+        "app_volumes_get_package":             ("app_volumes", av.get_package, ["package_id"]),
+        "app_volumes_search_writable_volumes": ("app_volumes", av.search_writable_volumes, None),
+        "app_volumes_get_writable_volume":     ("app_volumes", av.get_writable_volume, ["writable_id"]),
+        "app_volumes_grow_writable_volume":    ("app_volumes", av.grow_writable_volume, ["writable_ids", "size_mb"]),
+        # Horizon
+        "horizon_search_desktop_pools":  ("horizon", hz.search_desktop_pools, None),
+        "horizon_get_desktop_pool":      ("horizon", hz.get_desktop_pool, ["pool_id"]),
+        "horizon_search_farms":          ("horizon", hz.search_farms, None),
+        "horizon_get_farm":              ("horizon", hz.get_farm, ["farm_id"]),
+        "horizon_search_machines":       ("horizon", hz.search_machines, None),
+        "horizon_get_machine":           ("horizon", hz.get_machine, ["machine_id"]),
+        "horizon_search_sessions":       ("horizon", hz.search_sessions, None),
+        "horizon_get_session":           ("horizon", hz.get_session, ["session_id"]),
+        "horizon_disconnect_sessions":   ("horizon", hz.disconnect_sessions, ["session_ids"]),
+        "horizon_restart_machines":      ("horizon", hz.restart_machines, ["machine_ids"]),
+        # Identity Service
+        "identity_service_search_users":       ("identity_service", ids.search_users, None),
+        "identity_service_get_user":           ("identity_service", ids.get_user, ["user_id"]),
+        "identity_service_search_groups":      ("identity_service", ids.search_groups, None),
+        "identity_service_get_group":          ("identity_service", ids.get_group, ["group_id"]),
+        "identity_service_search_directories": ("identity_service", ids.search_directories, None),
+        "identity_service_get_directory":      ("identity_service", ids.get_directory, ["directory_id"]),
+        "identity_service_create_user":        ("identity_service", ids.create_user, ["user_resource"]),
+        # Workspace ONE Access
+        "access_search_users":                  ("access", acc.search_users, None),
+        "access_get_user":                      ("access", acc.get_user, ["user_id"]),
+        "access_search_groups":                 ("access", acc.search_groups, None),
+        "access_get_group":                     ("access", acc.get_group, ["group_id"]),
+        "access_search_entitlements":           ("access", acc.search_entitlements, None),
+        "access_get_activity_summary_report":   ("access", acc.get_activity_summary_report, ["interval"]),
+        "access_create_user":                   ("access", acc.create_user, ["user_resource"]),
+        # Horizon Cloud
+        "horizon_cloud_search_pools":               ("horizon_cloud", hc.search_pools, None),
+        "horizon_cloud_get_pool":                   ("horizon_cloud", hc.get_pool, ["pool_id"]),
+        "horizon_cloud_search_templates":           ("horizon_cloud", hc.search_templates, None),
+        "horizon_cloud_get_template":               ("horizon_cloud", hc.get_template, ["template_id"]),
+        "horizon_cloud_search_sessions":            ("horizon_cloud", hc.search_sessions, None),
+        "horizon_cloud_search_edge_deployments":    ("horizon_cloud", hc.search_edge_deployments, None),
+        "horizon_cloud_get_edge_deployment":        ("horizon_cloud", hc.get_edge_deployment, ["edge_id"]),
+        "horizon_cloud_search_active_directories":  ("horizon_cloud", hc.search_active_directories, None),
+        "horizon_cloud_search_uag_deployments":     ("horizon_cloud", hc.search_uag_deployments, None),
+        "horizon_cloud_search_sso_configurations":  ("horizon_cloud", hc.search_sso_configurations, None),
+    })
 
 
 # Map of API tool names to (function, argument keys)
@@ -944,15 +1844,15 @@ def _handle_migration(name: str, arguments: dict) -> list[TextContent]:
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     # --- RAG search tools ---
-    if name in ("search_uem_docs", "search_api_reference", "search_release_notes"):
-        if not stores_exist():
-            return [TextContent(
-                type="text",
-                text="RAG stores not found. Run 'wingman-mcp ingest' to build them, "
-                     "or 'wingman-mcp setup' to download pre-built stores.",
-            )]
-
+    if name in ("search_uem_docs", "search_api_reference", "search_release_notes",
+                "search_omnissa_docs"):
         if name == "search_uem_docs":
+            if not stores_exist():
+                return [TextContent(
+                    type="text",
+                    text="RAG stores not found. Run 'wingman-mcp ingest' to build them, "
+                         "or 'wingman-mcp setup' to download pre-built stores.",
+                )]
             results = search_uem(
                 query=arguments["query"],
                 db=_get_store("uem"),
@@ -962,15 +1862,49 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             results = search_api(
                 query=arguments["query"],
                 db=_get_store("api"),
+                product=arguments.get("product", "uem"),
                 max_results=arguments.get("max_results", 10),
             )
-        else:
+        elif name == "search_release_notes":
             results = search_release_notes(
                 query=arguments["query"],
                 db=_get_store("release_notes"),
                 version=arguments.get("version"),
+                product=arguments.get("product", "uem"),
                 max_results=arguments.get("max_results", 15),
             )
+        else:  # search_omnissa_docs
+            from wingman_mcp.ingest.products import PRODUCTS
+            product_slug = arguments.get("product")
+            if product_slug not in PRODUCTS:
+                return [TextContent(
+                    type="text",
+                    text=f"Unknown product '{product_slug}'. Valid: {', '.join(PRODUCTS)}",
+                )]
+            from pathlib import Path
+            store_path = Path(get_store_dir(product_slug))
+            if not (store_path / "chroma.sqlite3").exists():
+                return [TextContent(
+                    type="text",
+                    text=f"Store for product '{product_slug}' has not been built. "
+                         f"Run: wingman-mcp ingest {product_slug}",
+                )]
+            cfg = PRODUCTS[product_slug]
+            # Route the UEM slug through the multi-family scorer for parity
+            # with `search_uem_docs`.
+            if product_slug == "uem":
+                results = search_uem(
+                    query=arguments["query"],
+                    db=_get_store("uem"),
+                    max_results=arguments.get("max_results", 10),
+                )
+            else:
+                results = search_product_docs(
+                    query=arguments["query"],
+                    db=_get_store(product_slug),
+                    search_prefix=cfg.search_prefix,
+                    max_results=arguments.get("max_results", 10),
+                )
 
         if not results:
             return [TextContent(type="text", text="No results found.")]
@@ -1015,9 +1949,93 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         except Exception as e:
             return [TextContent(type="text", text=f"API error: {e}")]
 
+    # --- Non-UEM product API tools ---
+    if not _PRODUCT_API_TOOLS:
+        _register_product_api_tools()
+
+    if name in _PRODUCT_API_TOOLS:
+        product, func, positional_keys = _PRODUCT_API_TOOLS[name]
+        env_name = arguments.pop("env", "default")
+        try:
+            client = _get_product_client(product, env_name)
+        except RuntimeError as e:
+            return [TextContent(type="text", text=str(e))]
+
+        try:
+            if positional_keys:
+                pos_args = [arguments[k] for k in positional_keys]
+                kwargs = {k: v for k, v in arguments.items() if k not in positional_keys}
+                result = func(client, *pos_args, **kwargs)
+            else:
+                result = func(client, **arguments)
+            return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+        except Exception as e:
+            # On auth failures, drop the cached client so the next call re-logs in.
+            if "401" in str(e) or "403" in str(e):
+                _product_clients.pop((product, env_name), None)
+            return [TextContent(type="text", text=f"{product} API error: {e}")]
+
     return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
 
 async def run_server():
     async with stdio_server() as (read, write):
         await app.run(read, write, app.create_initialization_options())
+
+
+async def run_http_server(host: str = "0.0.0.0", port: int = 8000) -> None:
+    """Run the MCP server over Streamable HTTP for hosted/cloud deployments.
+
+    Each user's UEM credentials are passed via request headers and are never
+    stored server-side.  The server acts as a stateless proxy.
+
+    Required dependencies: pip install 'wingman-mcp[cloud]'
+    """
+    try:
+        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+        from starlette.responses import JSONResponse, PlainTextResponse
+        from starlette.types import ASGIApp, Receive, Scope, Send
+        import uvicorn
+    except ImportError as exc:
+        raise SystemExit(
+            f"HTTP mode requires additional dependencies: {exc}\n"
+            "Install with: pip install 'wingman-mcp[cloud]'"
+        ) from exc
+
+    from wingman_mcp.middleware import CredentialHeaderMiddleware
+
+    session_manager = StreamableHTTPSessionManager(
+        app=app,
+        event_store=None,
+        json_response=False,
+        stateless=True,
+    )
+
+    class _App:
+        """Minimal ASGI app: routes /health and /mcp."""
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] == "lifespan":
+                msg = await receive()
+                if msg["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                msg = await receive()
+                if msg["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+            elif scope["type"] == "http":
+                if scope["path"] == "/health":
+                    resp = PlainTextResponse("ok")
+                    await resp(scope, receive, send)
+                else:
+                    await session_manager.handle_request(scope, receive, send)
+
+    asgi_app = CredentialHeaderMiddleware(_App())
+
+    print(f"wingman-mcp HTTP server starting on {host}:{port}")
+    print(f"MCP endpoint : http://{host}:{port}/mcp")
+    print(f"Health check : http://{host}:{port}/health")
+
+    config = uvicorn.Config(asgi_app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+
+    async with session_manager.run():
+        await server.serve()

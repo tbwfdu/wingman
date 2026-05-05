@@ -1,0 +1,13 @@
+.venv/
+dist/
+stores/
+downloads/
+profiles/
+scripts/
+.git/
+.claude/
+__pycache__/
+**/__pycache__/
+**/*.pyc
+.DS_Store
+*.egg-info/
