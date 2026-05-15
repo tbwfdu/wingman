@@ -1,8 +1,9 @@
 """Per-request context variables for HTTP server mode.
 
-These ContextVars are set by EntraAuthMiddleware and CredentialHeaderMiddleware
+These ContextVars are populated by the HTTP transport's request middleware
 before each MCP request is dispatched, allowing call_tool handlers to access
-the caller's identity and UEM credentials without any server-side storage.
+the caller's identity and credentials without any server-side storage. In
+local stdio mode they keep their defaults.
 """
 import contextvars
 from dataclasses import dataclass
@@ -41,8 +42,8 @@ def get_request_product_credentials(product: str) -> Optional[dict]:
 class Principal:
     """Verified identity of the HTTP caller for a single request.
 
-    Set by EntraAuthMiddleware. `oid`, `tid`, `upn` come from the validated
-    Entra JWT; they are all None when `auth_method == "static_key"`.
+    Populated in HTTP mode from the request's validated identity token.
+    `oid`, `tid`, `upn` are all None when `auth_method == "static_key"`.
     """
 
     oid: Optional[str]
@@ -51,8 +52,8 @@ class Principal:
     auth_method: Literal["entra", "static_key"]
 
 
-# Set by EntraAuthMiddleware on every authenticated HTTP request; None in
-# stdio mode or before the middleware has run.
+# Populated on every authenticated HTTP request; None in stdio mode or
+# before the request middleware has run.
 _request_principal: contextvars.ContextVar[Optional[Principal]] = contextvars.ContextVar(
     "request_principal", default=None
 )
