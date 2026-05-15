@@ -1,5 +1,5 @@
 """Smoke tests on the PRODUCTS registry shape."""
-from wingman_mcp.ingest.products import (
+from wingman_mcp.products import (
     PRODUCTS,
     ProductConfig,
     ReleaseNotesSource,

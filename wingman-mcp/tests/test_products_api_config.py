@@ -1,7 +1,7 @@
 """Smoke tests on the api configuration shape."""
 import pytest
 
-from wingman_mcp.ingest.products import (
+from wingman_mcp.products import (
     ApiSource,
     PRODUCTS,
     ProductConfig,

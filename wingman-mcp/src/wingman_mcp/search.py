@@ -162,7 +162,7 @@ def search_api(
 
     Defaults to product='uem' so existing callers keep working unchanged.
     """
-    from wingman_mcp.ingest.products import PRODUCTS
+    from wingman_mcp.products import PRODUCTS
 
     if product not in PRODUCTS:
         return [{
@@ -291,7 +291,7 @@ def search_release_notes(
     Component-focused multi-pass search (Windows / macOS / etc.) only fires
     for UEM, since those headings are UEM-specific.
     """
-    from wingman_mcp.ingest.products import PRODUCTS
+    from wingman_mcp.products import PRODUCTS
 
     if product not in PRODUCTS:
         return [{

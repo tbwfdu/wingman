@@ -24,7 +24,7 @@ _embeddings = None
 _auths: dict[str, Any] = {}
 
 # Non-UEM product API client cache, keyed by (product, env_name).
-_product_clients: dict[tuple[str, str], Any] = {}
+_product_clients: dict[tuple, Any] = {}
 
 
 def _get_embeddings():
@@ -42,10 +42,13 @@ def _get_auth(env_name: str = "default"):
     by CredentialHeaderMiddleware.  In local stdio mode, credentials are loaded
     from the OS keychain / config file as usual.
     """
-    from wingman_mcp.request_context import _is_http_request, _request_credentials
+    from wingman_mcp.request_context import (
+        _is_http_request,
+        get_request_product_credentials,
+    )
 
     if _is_http_request.get():
-        creds = _request_credentials.get()
+        creds = get_request_product_credentials("uem")
         if creds is None:
             return None
         # Cache UEMAuth by a fingerprint of the credentials so that repeated
@@ -160,9 +163,8 @@ TOOLS = [
             "  - For a Workspace ONE UEM question, prefer 'search_uem_docs' "
             "    which has tuned multi-family scoring; this tool is the "
             "    fallback for everything else.\n\n"
-            "Run 'wingman-mcp ingest --list' on the host to see which "
-            "product stores have been built — only built stores can be "
-            "searched."
+            "Only built stores can be searched; contact your administrator "
+            "if a product you expect is missing."
         ),
         inputSchema={
             "type": "object",
@@ -1603,9 +1605,16 @@ def _require_auth(env_name: str = "default") -> "UEMAuth":
         from wingman_mcp.request_context import _is_http_request
         if _is_http_request.get():
             raise RuntimeError(
-                "UEM API credentials not provided. Add the following headers to your "
-                "MCP server configuration: X-UEM-Client-ID, X-UEM-Client-Secret, "
-                "X-UEM-Token-URL, X-UEM-API-URL."
+                "UEM credentials are not present in this request. "
+                "This MCP server runs in HTTP mode, so per-user credentials "
+                "must travel as request headers (X-UEM-Client-ID, "
+                "X-UEM-Client-Secret, X-UEM-Token-URL, X-UEM-API-URL). "
+                "Either:\n"
+                "  - Run `wingman-mcp link claude --product uem` on your "
+                "machine to write the headers into your Claude config, or\n"
+                "  - Run wingman-mcp locally in stdio mode "
+                "(`pip install wingman-mcp && wingman-mcp serve`) so "
+                "credentials come from your OS keychain."
             )
         raise RuntimeError(
             f"UEM API credentials are not configured for environment '{env_name}'. "
@@ -1626,17 +1635,46 @@ _PRODUCT_API_TOOLS: dict[str, tuple[str, Any, Optional[list[str]]]] = {}
 def _build_product_client(product: str, env_name: str):
     """Construct a product API client from stored credentials.
 
+    In HTTP mode, credentials come from the per-request headers parsed by
+    CredentialHeaderMiddleware. In stdio mode, they come from the OS
+    keychain / config file.
+
     Returns the client or raises RuntimeError with a user-friendly message.
     """
-    from wingman_mcp.credentials import load_product_credentials
+    from wingman_mcp.credentials import SCHEMAS, load_product_credentials
+    from wingman_mcp.request_context import (
+        _is_http_request,
+        get_request_product_credentials,
+    )
 
-    creds = load_product_credentials(product, env_name)
-    if creds is None:
-        raise RuntimeError(
-            f"{product} credentials are not configured for environment "
-            f"'{env_name}'. Run 'wingman-mcp auth set --product {product} "
-            f"--env {env_name}' to provide them."
-        )
+    if _is_http_request.get():
+        creds = get_request_product_credentials(product)
+        if creds is None:
+            schema = SCHEMAS.get(product)
+            headers = (
+                ", ".join(schema.http_header_names.values())
+                if schema and schema.http_header_names
+                else "the required headers"
+            )
+            raise RuntimeError(
+                f"{product} credentials are not present in this request. "
+                f"This MCP server runs in HTTP mode, so per-user credentials "
+                f"must travel as request headers ({headers}). Either:\n"
+                f"  - Run `wingman-mcp link claude --product {product}` on "
+                f"your machine to write the headers into your Claude config, "
+                f"or\n"
+                f"  - Run wingman-mcp locally in stdio mode "
+                f"(`pip install wingman-mcp && wingman-mcp serve`) so "
+                f"credentials come from your OS keychain."
+            )
+    else:
+        creds = load_product_credentials(product, env_name)
+        if creds is None:
+            raise RuntimeError(
+                f"{product} credentials are not configured for environment "
+                f"'{env_name}'. Run 'wingman-mcp auth set --product {product} "
+                f"--env {env_name}' to provide them."
+            )
     if product == "app_volumes":
         from wingman_mcp.app_volumes_api import AppVolumesClient
         return AppVolumesClient(
@@ -1680,7 +1718,30 @@ def _build_product_client(product: str, env_name: str):
 
 
 def _get_product_client(product: str, env_name: str = "default"):
-    key = (product, env_name)
+    """Return a cached product client.
+
+    In HTTP mode, the cache key includes a hash of the per-request
+    credentials so different users don't share each other's clients
+    (each carries auth tokens / session state). In stdio mode, the key
+    is (product, env_name) since credentials are process-wide.
+    """
+    from wingman_mcp.request_context import (
+        _is_http_request,
+        get_request_product_credentials,
+    )
+
+    if _is_http_request.get():
+        creds = get_request_product_credentials(product)
+        if creds is None:
+            # Let _build_product_client raise the helpful error.
+            return _build_product_client(product, env_name)
+        fingerprint = hashlib.sha256(
+            ":".join(f"{k}={v}" for k, v in sorted(creds.items())).encode()
+        ).hexdigest()
+        key = (product, "http", fingerprint)
+    else:
+        key = (product, env_name)
+
     if key not in _product_clients:
         _product_clients[key] = _build_product_client(product, env_name)
     return _product_clients[key]
@@ -1850,8 +1911,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             if not stores_exist():
                 return [TextContent(
                     type="text",
-                    text="RAG stores not found. Run 'wingman-mcp ingest' to build them, "
-                         "or 'wingman-mcp setup' to download pre-built stores.",
+                    text="RAG stores are not available on this server. "
+                         "Contact your administrator.",
                 )]
             results = search_uem(
                 query=arguments["query"],
@@ -1874,7 +1935,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 max_results=arguments.get("max_results", 15),
             )
         else:  # search_omnissa_docs
-            from wingman_mcp.ingest.products import PRODUCTS
+            from wingman_mcp.products import PRODUCTS
             product_slug = arguments.get("product")
             if product_slug not in PRODUCTS:
                 return [TextContent(
@@ -1886,8 +1947,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             if not (store_path / "chroma.sqlite3").exists():
                 return [TextContent(
                     type="text",
-                    text=f"Store for product '{product_slug}' has not been built. "
-                         f"Run: wingman-mcp ingest {product_slug}",
+                    text=f"Store for product '{product_slug}' is not "
+                         f"available on this server. Contact your "
+                         f"administrator.",
                 )]
             cfg = PRODUCTS[product_slug]
             # Route the UEM slug through the multi-family scorer for parity
@@ -1981,61 +2043,3 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 async def run_server():
     async with stdio_server() as (read, write):
         await app.run(read, write, app.create_initialization_options())
-
-
-async def run_http_server(host: str = "0.0.0.0", port: int = 8000) -> None:
-    """Run the MCP server over Streamable HTTP for hosted/cloud deployments.
-
-    Each user's UEM credentials are passed via request headers and are never
-    stored server-side.  The server acts as a stateless proxy.
-
-    Required dependencies: pip install 'wingman-mcp[cloud]'
-    """
-    try:
-        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-        from starlette.responses import JSONResponse, PlainTextResponse
-        from starlette.types import ASGIApp, Receive, Scope, Send
-        import uvicorn
-    except ImportError as exc:
-        raise SystemExit(
-            f"HTTP mode requires additional dependencies: {exc}\n"
-            "Install with: pip install 'wingman-mcp[cloud]'"
-        ) from exc
-
-    from wingman_mcp.middleware import CredentialHeaderMiddleware
-
-    session_manager = StreamableHTTPSessionManager(
-        app=app,
-        event_store=None,
-        json_response=False,
-        stateless=True,
-    )
-
-    class _App:
-        """Minimal ASGI app: routes /health and /mcp."""
-        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-            if scope["type"] == "lifespan":
-                msg = await receive()
-                if msg["type"] == "lifespan.startup":
-                    await send({"type": "lifespan.startup.complete"})
-                msg = await receive()
-                if msg["type"] == "lifespan.shutdown":
-                    await send({"type": "lifespan.shutdown.complete"})
-            elif scope["type"] == "http":
-                if scope["path"] == "/health":
-                    resp = PlainTextResponse("ok")
-                    await resp(scope, receive, send)
-                else:
-                    await session_manager.handle_request(scope, receive, send)
-
-    asgi_app = CredentialHeaderMiddleware(_App())
-
-    print(f"wingman-mcp HTTP server starting on {host}:{port}")
-    print(f"MCP endpoint : http://{host}:{port}/mcp")
-    print(f"Health check : http://{host}:{port}/health")
-
-    config = uvicorn.Config(asgi_app, host=host, port=port, log_level="info")
-    server = uvicorn.Server(config)
-
-    async with session_manager.run():
-        await server.serve()

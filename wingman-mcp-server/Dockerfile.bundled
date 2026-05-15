@@ -1,0 +1,48 @@
+# NOTE: the COPY / pip install lines below still assume the pre-split
+# single-package layout (one package, [cloud] extra, src/wingman_mcp). They
+# need a pass for the wingman-mcp-server + wingman-mcp[rag] two-package
+# layout, alongside a test deploy. Only the CMD has been updated.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Layer order is deliberate. We want code-only changes to invalidate only the
+# tail of the layer chain (small COPY src + non-deps pip install), so the slow
+# bits (torch download, dep resolution, embedding-model download, 1.6 GB stores
+# copy) stay cached across builds. Builders that respect this layering (local
+# `docker build`, ACR Tasks with cache, BuildKit with --cache-from) get a fast
+# inner loop; a no-cache builder pays the same cost as before.
+
+# 1. CPU-only PyTorch. Heavy (~1.5 GB extracted). Changes only when we bump the
+#    base image or torch version; nothing in this repo invalidates it.
+RUN pip install --no-cache-dir \
+    torch --index-url https://download.pytorch.org/whl/cpu
+
+# 2. Dependency lock layer. Copy just the package metadata + a stub source tree
+#    so hatchling can build a near-empty wheel and pip resolves the full dep
+#    graph here. Invalidates only when pyproject.toml or README.md change.
+COPY pyproject.toml README.md ./
+RUN mkdir -p src/wingman_mcp && touch src/wingman_mcp/__init__.py
+RUN pip install --no-cache-dir ".[cloud]"
+
+# 3. Pre-download the embedding model (~90 MB) so containers start instantly
+#    without hitting HuggingFace on first query. Invalidates only when the
+#    sentence-transformers version changes (i.e. pyproject.toml dep change).
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
+# 4. Real source. Replaces the stub and re-installs the wheel with --no-deps
+#    so dep resolution doesn't re-run. Volatile layer: code-only edits land
+#    here.
+COPY src/ ./src/
+RUN pip install --no-cache-dir --no-deps --force-reinstall .
+
+# 5. RAG stores (~1.6 GB). Kept as the final layer so it only re-uploads when
+#    the stores themselves change, never on a code-only rebuild.
+COPY stores/ /app/stores/
+
+# Point the server at the baked-in stores instead of any runtime mount.
+ENV WINGMAN_MCP_DATA_DIR=/app/stores
+
+EXPOSE 8000
+
+CMD ["wingman-mcp-server", "serve", "--port", "8000"]

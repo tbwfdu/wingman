@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wingman-mcp-server"
+version = "0.5.5"
+description = "HTTP transport, Entra ID auth, and RAG ingestion for wingman-mcp"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    # The server runs the shared MCP tool layer + RAG, so it needs the
+    # public package with its RAG extra. In dev, install it editable first:
+    #   pip install -e ../wingman-mcp[rag]
+    # For release, pin a git tag, e.g.
+    #   wingman-mcp[rag] @ git+https://github.com/tbwfdu/wingman.git@v0.5.5
+    "wingman-mcp[rag]>=0.5.5",
+    "httpx>=0.27.0",
+    # HTTP transport
+    "starlette>=0.40.0",
+    "uvicorn>=0.30.0",
+    "pyjwt[crypto]>=2.8.0",
+    # RAG ingestion / scraping
+    "requests",
+    "beautifulsoup4",
+    "tqdm",
+    "python-dotenv",
+    "pyyaml>=6.0",
+    "pypdf>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+wingman-mcp-server = "wingman_mcp_server.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wingman_mcp_server"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+asyncio_mode = "strict"
+markers = [
+    "asyncio: mark test as an asyncio coroutine",
+]

@@ -14,7 +14,7 @@ def get_data_dir() -> Path:
 def _product_store_keys() -> tuple[str, ...]:
     """Lazy import to avoid pulling ingest deps into the runtime path."""
     try:
-        from wingman_mcp.ingest.products import list_product_slugs
+        from wingman_mcp.products import list_product_slugs
         return tuple(list_product_slugs())
     except Exception:
         # Ingest extras may not be installed in slim runtime distributions.

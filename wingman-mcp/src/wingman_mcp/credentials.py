@@ -43,16 +43,25 @@ class CredentialSchema:
     file (non-secret).  env_var_aliases optionally maps legacy/unprefixed
     environment variable names to schema fields (currently used to keep the
     pre-multiproduct UEM env vars working).
+
+    http_header_names maps schema field -> HTTP header name expected on
+    incoming requests in HTTP mode. Same names are emitted by `wingman-mcp
+    link claude` when generating client configs, so this dict is the single
+    source of truth for per-request credential transport.
     """
     product: str
     label: str
     secret_keys: tuple[str, ...]
     config_keys: tuple[str, ...]
     env_var_aliases: dict[str, str] = field(default_factory=dict)
+    http_header_names: dict[str, str] = field(default_factory=dict)
 
     @property
     def all_fields(self) -> tuple[str, ...]:
         return self.secret_keys + self.config_keys
+
+    def header_for(self, schema_field: str) -> Optional[str]:
+        return self.http_header_names.get(schema_field)
 
 
 SCHEMAS: dict[str, CredentialSchema] = {
@@ -61,12 +70,18 @@ SCHEMAS: dict[str, CredentialSchema] = {
         label="Workspace ONE UEM",
         secret_keys=("client_id", "client_secret"),
         config_keys=("token_url", "api_base_url"),
-        # Legacy unprefixed env vars (predate multi-product support).
         env_var_aliases={
             "WINGMAN_MCP_CLIENT_ID": "client_id",
             "WINGMAN_MCP_CLIENT_SECRET": "client_secret",
             "WINGMAN_MCP_TOKEN_URL": "token_url",
             "WINGMAN_MCP_API_URL": "api_base_url",
+        },
+        # Legacy header names predate multi-product support; preserved verbatim.
+        http_header_names={
+            "client_id": "X-UEM-Client-ID",
+            "client_secret": "X-UEM-Client-Secret",
+            "token_url": "X-UEM-Token-URL",
+            "api_base_url": "X-UEM-API-URL",
         },
     ),
     "horizon": CredentialSchema(
@@ -74,30 +89,59 @@ SCHEMAS: dict[str, CredentialSchema] = {
         label="Horizon (Connection Server)",
         secret_keys=("username", "password"),
         config_keys=("server_url", "domain"),
+        http_header_names={
+            "username": "X-Horizon-Username",
+            "password": "X-Horizon-Password",
+            "server_url": "X-Horizon-Server-URL",
+            "domain": "X-Horizon-Domain",
+        },
     ),
     "horizon_cloud": CredentialSchema(
         product="horizon_cloud",
         label="Horizon Cloud Service",
         secret_keys=("client_id", "client_secret"),
         config_keys=("api_base_url", "org_id"),
+        http_header_names={
+            "client_id": "X-Horizon-Cloud-Client-ID",
+            "client_secret": "X-Horizon-Cloud-Client-Secret",
+            "api_base_url": "X-Horizon-Cloud-API-Base-URL",
+            "org_id": "X-Horizon-Cloud-Org-ID",
+        },
     ),
     "app_volumes": CredentialSchema(
         product="app_volumes",
         label="App Volumes",
         secret_keys=("username", "password"),
         config_keys=("manager_url",),
+        http_header_names={
+            "username": "X-App-Volumes-Username",
+            "password": "X-App-Volumes-Password",
+            "manager_url": "X-App-Volumes-Manager-URL",
+        },
     ),
     "access": CredentialSchema(
         product="access",
         label="Workspace ONE Access",
         secret_keys=("client_id", "client_secret"),
         config_keys=("tenant_url", "token_url"),
+        http_header_names={
+            "client_id": "X-Access-Client-ID",
+            "client_secret": "X-Access-Client-Secret",
+            "tenant_url": "X-Access-Tenant-URL",
+            "token_url": "X-Access-Token-URL",
+        },
     ),
     "identity_service": CredentialSchema(
         product="identity_service",
         label="Omnissa Identity Service",
         secret_keys=("client_id", "client_secret"),
         config_keys=("tenant_url", "token_url"),
+        http_header_names={
+            "client_id": "X-Identity-Service-Client-ID",
+            "client_secret": "X-Identity-Service-Client-Secret",
+            "tenant_url": "X-Identity-Service-Tenant-URL",
+            "token_url": "X-Identity-Service-Token-URL",
+        },
     ),
 }
 

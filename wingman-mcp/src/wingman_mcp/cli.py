@@ -8,222 +8,16 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-
 def cmd_serve(args):
-    """Run the MCP server."""
-    if args.http:
-        from wingman_mcp.server import run_http_server
-        asyncio.run(run_http_server(host=args.host, port=args.port))
-    else:
-        from wingman_mcp.server import run_server
-        asyncio.run(run_server())
+    """Run the local MCP server over stdio."""
+    from wingman_mcp.server import run_server
+    asyncio.run(run_server())
 
 
 def cmd_setup(args):
     """Download pre-built stores from GitHub Releases."""
     print("Setup: downloading pre-built stores is not yet implemented.")
-    print("Use 'wingman-mcp ingest' to build stores from source instead.")
-
-
-def cmd_ingest(args):
-    """Run ingestion scripts to build stores."""
-    try:
-        from wingman_mcp.embeddings import LocalEmbeddings
-    except ImportError:
-        print("The ingest command is not available in this distribution.")
-        sys.exit(1)
-
-    from wingman_mcp.config import get_store_dir, get_store_keys
-    from wingman_mcp.ingest.products import PRODUCTS, list_product_slugs
-
-    if getattr(args, "list", False):
-        print("Available stores:\n")
-        print("  Product documentation:")
-        for slug in list_product_slugs():
-            cfg = PRODUCTS[slug]
-            print(f"    {slug:<18} {cfg.label}")
-        print("\n  Combined stores:")
-        print(f"    {'api':<18} REST API references — supports all products with APIs")
-        print(f"    {'release_notes':<18} Release notes — supports all products")
-        print("\n  Per-product axes (writes to combined stores):")
-        print(f"    {'<slug>_rn':<18} e.g. horizon_rn — that product's release notes only")
-        print(f"    {'<slug>_api':<18} e.g. horizon_api — that product's API spec only")
-        print(f"    {' ':<18} (DEM and ThinApp have no API and reject *_api targets)")
-        print("\n  Aliases:")
-        print(f"    {'docs':<18} every product's documentation")
-        print(f"    {'rn':<18} every product's release notes")
-        print(f"    {'all':<18} everything (default when no targets given)")
-        return
-
-    product_slugs = list_product_slugs()
-    valid_keys = set(get_store_keys())
-    aliases = {
-        "all": (
-            list(valid_keys)
-            + [f"{s}_rn" for s in product_slugs]
-            + [f"{s}_api" for s in product_slugs if PRODUCTS[s].api is not None]
-        ),
-        "docs": product_slugs,
-        "rn": [f"{s}_rn" for s in product_slugs if PRODUCTS[s].release_notes is not None],
-    }
-
-    raw_targets = args.stores or ["all"]
-    docs_targets: list[str] = []
-    rn_targets: list[str] = []
-    api_targets: list[str] = []
-    other_targets: list[str] = []
-    seen: set[str] = set()
-
-    for t in raw_targets:
-        expanded = aliases.get(t, [t])
-        for k in expanded:
-            if k in seen:
-                continue
-            seen.add(k)
-            if k.endswith("_rn"):
-                slug = k[:-3]
-                if slug not in product_slugs:
-                    print(f"Error: unknown product in '{k}'.")
-                    sys.exit(1)
-                rn_targets.append(slug)
-            elif k.endswith("_api"):
-                slug = k[:-4]
-                if slug not in product_slugs:
-                    print(f"Error: unknown product in '{k}'.")
-                    sys.exit(1)
-                if PRODUCTS[slug].api is None and slug != "uem":
-                    print(f"Error: {slug} has no REST API; '{k}' is not valid.")
-                    sys.exit(1)
-                api_targets.append(slug)
-            elif k in valid_keys:
-                if k in product_slugs:
-                    docs_targets.append(k)
-                else:
-                    other_targets.append(k)
-            else:
-                print(f"Error: unknown store '{k}'. Run 'wingman-mcp ingest --list' for options.")
-                sys.exit(1)
-
-    embeddings = LocalEmbeddings()
-
-    # Resolve API + RN target expansion before counting steps so the
-    # progress total is accurate.
-    if "api" in other_targets:
-        api_targets = ["uem"] + [s for s in product_slugs if PRODUCTS[s].api is not None]
-    if "release_notes" in other_targets:
-        rn_targets = [s for s in product_slugs if PRODUCTS[s].release_notes is not None]
-
-    # docs steps run in registry order; api / RN run in user-input order.
-    ordered_docs = [s for s in product_slugs if s in docs_targets]
-    total_steps = len(ordered_docs) + len(api_targets) + len(rn_targets)
-    if total_steps == 0:
-        print("Nothing to do. Run 'wingman-mcp ingest --list' to see options.")
-        return
-
-    print(f"\nIngesting across {total_steps} step(s)...")
-    import time
-    t_start = time.time()
-    step = 0
-
-    # --- Phase 1: per-product docs ---
-    for slug in ordered_docs:
-        step += 1
-        print(f"\n[{step}/{total_steps}] Ingesting {slug} documentation")
-        from wingman_mcp.ingest.ingest_docs import ingest_product
-        ingest_product(
-            product=PRODUCTS[slug],
-            store_dir=get_store_dir(slug),
-            embeddings=embeddings,
-            max_workers=args.max_workers,
-            batch_size=args.batch_size,
-        )
-
-    # --- Phase 2: API references (one step per product) ---
-    if api_targets:
-        from wingman_mcp.ingest.ingest_api import ingest_api, ingest_api_for_product
-        for slug in api_targets:
-            step += 1
-            print(f"\n[{step}/{total_steps}] Ingesting API reference for {slug}")
-            if slug == "uem":
-                ingest_api(store_dir=get_store_dir("api"), embeddings=embeddings)
-            else:
-                ingest_api_for_product(
-                    slug=slug,
-                    store_dir=get_store_dir("api"),
-                    embeddings=embeddings,
-                )
-
-    # --- Phase 3: release notes (one step per product) ---
-    if rn_targets:
-        from wingman_mcp.ingest.ingest_release_notes import ingest_release_notes
-        for slug in rn_targets:
-            step += 1
-            print(f"\n[{step}/{total_steps}] Ingesting release notes for {slug}")
-            ingest_release_notes(
-                store_dir=get_store_dir("release_notes"),
-                embeddings=embeddings,
-                products=[slug],
-            )
-
-    elapsed = int(time.time() - t_start)
-    mins, secs = divmod(elapsed, 60)
-    print(f"\nIngestion complete: {step}/{total_steps} steps in {mins}m {secs}s.")
-
-
-def cmd_check(args):
-    """Report what would change if stores were rebuilt."""
-    try:
-        from wingman_mcp.ingest.check import check_all
-    except ImportError:
-        print("The check command is not available in this distribution "
-              "(ingest extras not installed). Run: pip install -e '.[ingest]'")
-        sys.exit(1)
-
-    from wingman_mcp.config import get_store_keys
-    from wingman_mcp.ingest.products import PRODUCTS, list_product_slugs
-
-    product_slugs = list_product_slugs()
-    valid_keys = set(get_store_keys())
-    aliases = {
-        "all": (
-            list(valid_keys)
-            + [f"{s}_rn" for s in product_slugs]
-            + [f"{s}_api" for s in product_slugs if PRODUCTS[s].api is not None]
-        ),
-        "docs": product_slugs,
-        "rn": [f"{s}_rn" for s in product_slugs if PRODUCTS[s].release_notes is not None],
-    }
-
-    raw_targets = args.stores or ["all"]
-    targets: list[str] = []
-    seen: set[str] = set()
-    for t in raw_targets:
-        expanded = aliases.get(t, [t])
-        for k in expanded:
-            if k in seen:
-                continue
-            seen.add(k)
-            if k.endswith("_rn"):
-                slug = k[:-3]
-                if slug not in product_slugs:
-                    print(f"Error: unknown product in '{k}'.")
-                    sys.exit(1)
-                targets.append(k)
-            elif k.endswith("_api"):
-                slug = k[:-4]
-                if slug not in product_slugs:
-                    print(f"Error: unknown product in '{k}'.")
-                    sys.exit(1)
-                if PRODUCTS[slug].api is None and slug != "uem":
-                    print(f"Error: {slug} has no REST API; '{k}' is not valid.")
-                    sys.exit(1)
-                targets.append(k)
-            elif k in valid_keys:
-                targets.append(k)
-            else:
-                print(f"Error: unknown store '{k}'.")
-                sys.exit(1)
-    check_all(targets)
+    print("Contact your administrator to obtain a pre-built stores bundle.")
 
 
 def cmd_status(args):
@@ -485,47 +279,13 @@ def _auth_list(product: Optional[str]):
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="wingman-mcp", description="Workspace ONE UEM documentation search MCP server")
+    parser = argparse.ArgumentParser(prog="wingman-mcp", description="Omnissa product documentation search MCP server")
     sub = parser.add_subparsers(dest="command")
 
-    serve_parser = sub.add_parser("serve", help="Run the MCP server (stdio or HTTP transport)")
-    serve_parser.add_argument(
-        "--http", action="store_true",
-        help="Run over Streamable HTTP instead of stdio (for hosted deployments)",
-    )
-    serve_parser.add_argument(
-        "--host", default="0.0.0.0",
-        help="Bind host for HTTP mode (default: 0.0.0.0)",
-    )
-    serve_parser.add_argument(
-        "--port", type=int, default=8000,
-        help="Bind port for HTTP mode (default: 8000)",
-    )
+    sub.add_parser("serve", help="Run the local MCP server (stdio transport)")
+
     sub.add_parser("setup", help="Download pre-built RAG stores")
     sub.add_parser("status", help="Show store and auth status")
-
-    ingest_parser = sub.add_parser(
-        "ingest",
-        help="Build RAG stores from source (run 'wingman-mcp ingest --list' to see options)",
-    )
-    ingest_parser.add_argument(
-        "stores", nargs="*",
-        help="Stores to ingest. Use product slug (e.g. 'uem', 'horizon'), "
-             "or aliases 'docs' (all product docs) / 'all' (everything). "
-             "Default: all.",
-    )
-    ingest_parser.add_argument("--list", action="store_true",
-                               help="List available product/store slugs and exit")
-    ingest_parser.add_argument("--max-workers", type=int, default=50,
-                               help="Parallel fetch workers (default: 50)")
-    ingest_parser.add_argument("--batch-size", type=int, default=500,
-                               help="Embedding batch size (default: 500)")
-
-    check_parser = sub.add_parser("check", help="Report what would change if stores were rebuilt (no writes)")
-    check_parser.add_argument(
-        "stores", nargs="*",
-        help="Stores to check. Same vocabulary as 'ingest'. Default: all.",
-    )
 
     export_parser = sub.add_parser("export", help="Export all UEM resources to disk")
     export_parser.add_argument("--env", "-e", default="default", help="Environment name (default: 'default')")
@@ -565,10 +325,6 @@ def main():
         cmd_serve(args)
     elif args.command == "setup":
         cmd_setup(args)
-    elif args.command == "ingest":
-        cmd_ingest(args)
-    elif args.command == "check":
-        cmd_check(args)
     elif args.command == "status":
         cmd_status(args)
     elif args.command == "export":
