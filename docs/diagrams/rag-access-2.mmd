@@ -1,0 +1,33 @@
+sequenceDiagram
+    autonumber
+    participant C as JIRA MCP client
+    participant S as wingman-mcp server
+    participant V as Chroma vector stores
+
+    opt First connect — only when using Entra ID (skipped for static-key auth)
+        C->>S: GET /.well-known/oauth-protected-resource
+        S-->>C: 200 · RFC 9728 metadata
+        C->>S: GET /.well-known/oauth-authorization-server
+        S-->>C: 200 · RFC 8414 metadata
+        C->>S: POST /oauth/register
+        S-->>C: 201 · client_id
+        C->>S: GET /oauth/authorize
+        S-->>C: 302 · redirect to Entra sign-in
+        C->>S: POST /oauth/token
+        S-->>C: 200 · access token
+    end
+
+    Note over C,S: MCP session — every message is POST /mcp. Each request carries Authorization Bearer or X-Wingman-Access-Key, and NO X-* product credential headers.
+
+    C->>S: POST /mcp · initialize
+    S-->>C: 200 · server capabilities
+    C->>S: POST /mcp · notifications/initialized
+    C->>S: POST /mcp · tools/list
+    S-->>C: 200 · tool catalogue (RAG + environment tools all listed)
+
+    C->>S: POST /mcp · tools/call · name=search_uem_docs
+    S->>V: vector similarity search (local, read-only)
+    V-->>S: matching documents
+    S-->>C: 200 · JSON search results
+
+    Note over C,S: A tools/call for an environment tool (uem_*, horizon_*, …) returns HTTP 200 but a ToolError in the body — no credentials.

@@ -1,0 +1,36 @@
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'fontFamily': 'ui-sans-serif, system-ui, sans-serif',
+    'fontSize': '13px',
+    'primaryColor': '#dbeafe',
+    'primaryTextColor': '#0f172a',
+    'primaryBorderColor': '#3b82f6',
+    'lineColor': '#475569',
+    'actorBkg': '#f1f5f9',
+    'actorBorder': '#64748b',
+    'actorTextColor': '#0f172a',
+    'noteBkgColor': '#fef3c7',
+    'noteBorderColor': '#d97706'
+  }
+}}%%
+sequenceDiagram
+  autonumber
+  participant C as MCP client
+  participant LB as TLS / LB
+  participant M as Middleware
+  participant S as Session Mgr
+  participant R as RAG tool
+
+  C->>LB: HTTPS POST /mcp(X-Wingman-Access-Key)
+  LB->>M: forward
+  alt invalid access key
+    M-->>C: 401 Unauthorized
+  else GET /health
+    M-->>C: 200 ok
+  else valid request
+    M->>S: pass through (stateless)
+    S->>R: dispatch tool call
+    R-->>S: result
+    S-->>C: response
+  end

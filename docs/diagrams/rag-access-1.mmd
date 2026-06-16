@@ -1,0 +1,61 @@
+flowchart TD
+    Client["Third-party MCP client<br/><span>e.g. JIRA integration</span><br/><br/>Authorization: Bearer &lt;jwt&gt;<br/>or X-Wingman-Access-Key<br/><b>NO product X-* credential headers</b>"]
+
+    Uvicorn["Uvicorn ASGI server<br/><span>/mcp endpoint</span>"]
+
+    subgraph Stack["ASGI middleware stack"]
+        direction TB
+        Entra{"EntraAuthMiddleware<br/><span>validate identity — REQUIRED</span>"}
+        Cred["CredentialHeaderMiddleware<br/><span>no X-* product headers found</span><br/><span>_request_credentials = None</span>"]
+        Router["_App router<br/><span>route → /mcp</span>"]
+    end
+
+    Reject["401 / 403<br/><span>no valid identity</span>"]
+
+    Session["StreamableHTTPSessionManager<br/><span>stateless dispatch</span>"]
+    Dispatch{"call_tool<br/><span>which tool?</span>"}
+
+    subgraph RAGPath["RAG path — available"]
+        direction TB
+        RAG["RAG search tools<br/><span>search_uem_docs · search_api_reference</span><br/><span>search_release_notes · search_omnissa_docs</span><br/><span>no _require_auth — credentials never checked</span>"]
+        Stores[("Local Chroma vector stores<br/><span>~/.wingman-mcp/stores/&lt;product&gt;/chroma.sqlite3</span><br/><span>embeddings: all-MiniLM-L6-v2 · read-only</span>")]
+    end
+
+    subgraph EnvPath["Environment path — blocked for this client"]
+        direction TB
+        Env["Environment tools<br/><span>uem_* · horizon_* · app_volumes_* · access_* · …</span><br/><span>call _require_auth() / _get_product_client()</span>"]
+        Blocked["ToolError — no credentials configured<br/><span>effectively unreachable without X-* headers</span>"]
+    end
+
+    Client -->|"POST /mcp · JSON-RPC"| Uvicorn
+    Uvicorn --> Entra
+    Entra -->|"invalid / missing"| Reject
+    Entra -->|"valid"| Cred
+    Cred --> Router
+    Router --> Session
+    Session --> Dispatch
+
+    Dispatch -->|"search_* (RAG)"| RAG
+    RAG -->|"vector similarity search"| Stores
+    Stores -. "JSON results" .-> Client
+
+    Dispatch -->|"uem_* / horizon_* / … (environment)"| Env
+    Env --> Blocked
+
+    classDef client fill:#1e293b,stroke:#0f172a,color:#f8fafc
+    classDef server fill:#334155,stroke:#1e293b,color:#f8fafc
+    classDef gate fill:#1e293b,stroke:#475569,color:#e2e8f0
+    classDef cred fill:#7c3aed,stroke:#5b21b6,color:#f5f3ff
+    classDef rag fill:#15803d,stroke:#166534,color:#f0fdf4
+    classDef store fill:#0e7490,stroke:#155e75,color:#ecfeff
+    classDef blocked fill:#6b7280,stroke:#374151,color:#f9fafb,stroke-dasharray:5 4
+    classDef reject fill:#dc2626,stroke:#991b1b,color:#fef2f2
+
+    class Client client
+    class Uvicorn,Session server
+    class Entra,Dispatch,Router gate
+    class Cred cred
+    class RAG rag
+    class Stores store
+    class Env,Blocked blocked
+    class Reject reject

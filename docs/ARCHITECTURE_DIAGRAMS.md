@@ -1,4 +1,4 @@
-–––# wingman-mcp architecture diagrams
+# wingman-mcp architecture diagrams
 
 Two architectural views of the wingman-mcp server: the default local stdio
 deployment, and a hypothetical hosted HTTP deployment exposing only the
