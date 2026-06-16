@@ -205,7 +205,7 @@ pip install "wingman-mcp[rag]"
 To install from a source checkout instead:
 
 ```bash
-git clone https://github.com/<your-org>/wingman-mcp.git
+git clone https://github.com/tbwfdu/wingman-mcp.git
 cd wingman-mcp
 pip install ".[rag]"
 ```
