@@ -44,11 +44,22 @@ def _get_auth(env_name: str = "default"):
     """
     from wingman_mcp.request_context import (
         _is_http_request,
+        get_env_selector,
         get_request_product_credentials,
     )
 
     if _is_http_request.get():
-        creds = get_request_product_credentials("uem")
+        # When the server has opted into per-call environment selection, an
+        # explicit (non-default) `env` resolves that named admin environment.
+        # The selector returns None for products supplied via request headers
+        # (header creds always win) and for unknown envs, in which case we fall
+        # back to the request's header-resolved credentials.
+        creds = None
+        selector = get_env_selector()
+        if selector is not None and env_name and env_name != "default":
+            creds = selector.resolve("uem", env_name)
+        if creds is None:
+            creds = get_request_product_credentials("uem")
         if creds is None:
             return None
         # Cache UEMAuth by a fingerprint of the credentials so that repeated
@@ -1576,8 +1587,11 @@ _ENV_PROPERTY = {
     "env": {
         "type": "string",
         "description": (
-            "Named environment to use (from 'wingman-mcp auth list'). "
-            "Defaults to 'default'."
+            "Named environment to target. In local mode, one of the "
+            "environments from 'wingman-mcp auth list'. In hosted mode, one of "
+            "the admin-managed environments from 'uem_list_environments' "
+            "(only honored when the server enables per-call environment "
+            "selection). Defaults to the server's default environment."
         ),
     }
 }
@@ -1644,11 +1658,19 @@ def _build_product_client(product: str, env_name: str):
     from wingman_mcp.credentials import SCHEMAS, load_product_credentials
     from wingman_mcp.request_context import (
         _is_http_request,
+        get_env_selector,
         get_request_product_credentials,
     )
 
     if _is_http_request.get():
-        creds = get_request_product_credentials(product)
+        # Honor an explicit `env` when per-call selection is enabled (see
+        # _get_auth); otherwise use the request's header-resolved credentials.
+        creds = None
+        selector = get_env_selector()
+        if selector is not None and env_name and env_name != "default":
+            creds = selector.resolve(product, env_name)
+        if creds is None:
+            creds = get_request_product_credentials(product)
         if creds is None:
             schema = SCHEMAS.get(product)
             headers = (
@@ -1974,6 +1996,32 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
     # --- UEM list environments (no auth required) ---
     if name == "uem_list_environments":
+        from wingman_mcp.request_context import _is_http_request, get_env_selector
+        if _is_http_request.get():
+            # In hosted mode, local keychain/config envs don't apply. List the
+            # admin-managed environments available for per-call `env` selection
+            # (only when the server has enabled it).
+            selector = get_env_selector()
+            if selector is not None:
+                envs = selector.environment_names("uem")
+                result = {
+                    "environments": envs,
+                    "count": len(envs),
+                    "note": (
+                        "Admin-managed environments. Pass one as the 'env' "
+                        "argument of a UEM tool to target it."
+                    ),
+                }
+            else:
+                result = {
+                    "environments": [],
+                    "count": 0,
+                    "note": (
+                        "Per-call environment selection is not enabled on this "
+                        "server; the configured default environment is used."
+                    ),
+                }
+            return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
         from wingman_mcp.credentials import list_environments, get_status
         envs = list_environments()
         result = {

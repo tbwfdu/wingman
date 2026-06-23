@@ -38,6 +38,30 @@ def get_request_product_credentials(product: str) -> Optional[dict]:
     return bundle.get(product)
 
 
+# Optional per-request admin environment selector. Set by the HTTP transport's
+# CredentialHeaderMiddleware ONLY when the server has opted into model-driven
+# per-call environment selection (WINGMAN_MCP_ALLOW_ENV_SELECTION). When
+# present, a tool handler can resolve a named environment passed as the call's
+# `env` argument instead of being pinned to the request's header-resolved
+# environment. Duck-typed to avoid a dependency on the hosting package: the
+# object exposes
+#     resolve(product, env_name) -> dict | None       (None = no override)
+#     environment_names(product)  -> list[str]
+# None in stdio mode, in BYO-credential deployments, or when the gate is off.
+_env_selector: contextvars.ContextVar[Optional[object]] = contextvars.ContextVar(
+    "env_selector", default=None
+)
+
+
+def get_env_selector():
+    """Return the per-request admin environment selector, or None.
+
+    Present only in HTTP mode when the server has enabled model-driven
+    per-call environment selection. None otherwise.
+    """
+    return _env_selector.get()
+
+
 @dataclass(frozen=True)
 class Principal:
     """Verified identity of the HTTP caller for a single request.
