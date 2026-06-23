@@ -44,6 +44,8 @@ def _get(auth: UEMAuth, path: str, params: Optional[dict] = None,
     url = f"{auth.api_base_url}{path}"
     resp = httpx.get(url, headers=_headers(auth, accept), params=params, timeout=TIMEOUT)
     resp.raise_for_status()
+    if not resp.content:
+        return {}
     return resp.json()
 
 
