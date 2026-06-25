@@ -16,7 +16,7 @@ Wingman gives AI assistants deep knowledge of Omnissa EUC products: documentatio
 
 Both expose the same tools: offline documentation search plus live API tools across UEM, Horizon, App Volumes, Access, Identity Service, and Horizon Cloud.
 
-## wingman-mcp
+# wingman-mcp
 
 An [MCP server](https://modelcontextprotocol.io) that runs locally and exposes tools to any MCP-compatible AI client (Claude Code, Claude Desktop, Cursor, VS Code Copilot, Windsurf, Codex, and more).
 
@@ -36,7 +36,9 @@ wingman-mcp auth set   # optional: connect to your environment for live API tool
 
 Then add `wingman-mcp serve` to your MCP client of choice. See [wingman-mcp/README.md](wingman-mcp/README.md) for client-specific configuration.
 
-## Wingman container (self-hosted server)
+<br> <br>
+
+# Wingman Container
 
 A single container that serves Wingman over HTTP, so a whole team can share one
 deployment instead of each person installing the package. No Azure, no Entra, no
