@@ -198,18 +198,50 @@ BASE=http://localhost:8000
 **Create an environment** (the first one per product becomes the default automatically):
 
 ```bash
+# Workspace ONE UEM
 curl -s -X POST $BASE/admin/environments \
   -H "X-Wingman-Admin-Key: $ADMIN" -H "Content-Type: application/json" \
-  -d '{
-        "product": "uem",
-        "name": "prod",
-        "credentials": {
-          "client_id": "abc123",
-          "client_secret": "s3cr3t",
-          "token_url": "https://as123.awmdm.com/oauth/token",
-          "api_base_url": "https://as123.awmdm.com/api"
-        }
-      }' | jq .
+  -d '{"product":"uem","name":"prod","credentials":{
+        "client_id":"your-client-id","client_secret":"your-client-secret",
+        "token_url":"https://REGION.uemauth.workspaceone.com/connect/token",
+        "api_base_url":"https://as123.awmdm.com"}}' | jq .
+
+# Horizon (Connection Server)
+curl -s -X POST $BASE/admin/environments \
+  -H "X-Wingman-Admin-Key: $ADMIN" -H "Content-Type: application/json" \
+  -d '{"product":"horizon","name":"prod","credentials":{
+        "username":"svc-wingman","password":"your-password",
+        "server_url":"https://connectionserver.example.com","domain":"CORP"}}' | jq .
+
+# Horizon Cloud Service
+curl -s -X POST $BASE/admin/environments \
+  -H "X-Wingman-Admin-Key: $ADMIN" -H "Content-Type: application/json" \
+  -d '{"product":"horizon_cloud","name":"prod","credentials":{
+        "client_id":"your-client-id","client_secret":"your-client-secret",
+        "api_base_url":"https://cloud.horizon.omnissa.com","org_id":"your-org-id"}}' | jq .
+
+# App Volumes
+curl -s -X POST $BASE/admin/environments \
+  -H "X-Wingman-Admin-Key: $ADMIN" -H "Content-Type: application/json" \
+  -d '{"product":"app_volumes","name":"prod","credentials":{
+        "username":"svc-wingman","password":"your-password",
+        "manager_url":"https://appvolumes.example.com"}}' | jq .
+
+# Workspace ONE Access
+curl -s -X POST $BASE/admin/environments \
+  -H "X-Wingman-Admin-Key: $ADMIN" -H "Content-Type: application/json" \
+  -d '{"product":"access","name":"prod","credentials":{
+        "client_id":"your-client-id","client_secret":"your-client-secret",
+        "tenant_url":"https://TENANT.us0.wss.workspaceone.com",
+        "token_url":"https://TENANT.us0.wss.workspaceone.com/SAAS/auth/oauthtoken"}}' | jq .
+
+# Omnissa Identity Service
+curl -s -X POST $BASE/admin/environments \
+  -H "X-Wingman-Admin-Key: $ADMIN" -H "Content-Type: application/json" \
+  -d '{"product":"identity_service","name":"prod","credentials":{
+        "client_id":"your-client-id","client_secret":"your-client-secret",
+        "tenant_url":"https://your-identity-service-host",
+        "token_url":"https://your-identity-service-host/acs/token"}}' | jq .
 ```
 
 Credential fields per product:
@@ -233,8 +265,8 @@ curl -s -H "X-Wingman-Admin-Key: $ADMIN" $BASE/admin/environments | jq .
 curl -s -X PUT $BASE/admin/environments/uem/prod \
   -H "X-Wingman-Admin-Key: $ADMIN" -H "Content-Type: application/json" \
   -d '{"credentials":{"client_id":"abc123","client_secret":"new-secret",
-        "token_url":"https://as123.awmdm.com/oauth/token",
-        "api_base_url":"https://as123.awmdm.com/api"}}' | jq .
+        "token_url":"https://REGION.uemauth.workspaceone.com/connect/token",
+        "api_base_url":"https://as123.awmdm.com"}}' | jq .
 
 # Promote to default
 curl -s -X POST $BASE/admin/environments/uem/dev/default \
