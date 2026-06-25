@@ -140,7 +140,7 @@ Point any Streamable-HTTP MCP client at the server and send your key in the
   "mcpServers": {
     "wingman": {
       "type": "http",
-      "url": "http://localhost:8000",
+      "url": "http://localhost:8000/mcp",
       "headers": { "X-Wingman-Access-Key": "<your-access-key>" }
     }
   }
