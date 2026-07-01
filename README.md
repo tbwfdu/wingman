@@ -9,7 +9,7 @@ Wingman gives AI assistants deep knowledge of Omnissa EUC products: documentatio
 | | **wingman-mcp** | **Wingman container** |
 |---|---|---|
 | Best for | An individual on their own machine | A team or org running a shared server |
-| Install | `pip install "wingman-mcp[rag]"` | `docker run ghcr.io/tbwfdu/wingman-mcp-server` |
+| Install | `pip install "wingman-mcp[rag]"` | `docker run ghcr.io/tbwfdu/wingman` |
 | Transport | Local (stdio) | HTTP (Streamable-HTTP) |
 | Credentials | Your own, via `wingman-mcp auth set` | Per-user headers, or shared admin environments |
 | Access control | n/a (single user) | Full / read-only / admin access keys |
@@ -80,7 +80,7 @@ Then start the container:
 ```bash
 docker run -d --name wingman -p 8000:8000 \
   --env-file wingman.env -v wingman-stores:/data/stores \
-  ghcr.io/tbwfdu/wingman-mcp-server:latest
+  ghcr.io/tbwfdu/wingman:latest
 
 # Watch the one-time store download on first boot
 docker logs -f wingman
@@ -100,7 +100,7 @@ docker run -d --name wingman -p 8000:8000 \
   -e WINGMAN_MCP_ADMIN_KEY=<admin-key> \
   -e WINGMAN_MCP_ENCRYPTION_KEY=<encryption-key> \
   -v wingman-stores:/data/stores \
-  ghcr.io/tbwfdu/wingman-mcp-server:latest
+  ghcr.io/tbwfdu/wingman:latest
 ```
 
 ### Environment variables
@@ -284,10 +284,10 @@ curl -s -o /dev/null -w '%{http_code}\n' -X DELETE \
 ### Updating
 
 ```bash
-docker pull ghcr.io/tbwfdu/wingman-mcp-server:latest
+docker pull ghcr.io/tbwfdu/wingman:latest
 docker rm -f wingman && docker run -d --name wingman -p 8000:8000 \
   --env-file wingman.env -v wingman-stores:/data/stores \
-  ghcr.io/tbwfdu/wingman-mcp-server:latest
+  ghcr.io/tbwfdu/wingman:latest
 ```
 
 ## License
