@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wingman-mcp"
-version = "0.5.6"
+version = "0.5.7"
 description = "Local MCP server for Omnissa product documentation search and API tools"
 readme = "README.md"
 license = "MIT"
@@ -13,7 +13,12 @@ requires-python = ">=3.10"
 # that only need the credential schema don't pull the RAG stack. Install the
 # full local product with the [rag] extra: pip install wingman-mcp[rag]
 dependencies = [
-    "mcp[cli]>=1.0.0",
+    # mcp 2.0.0 is a breaking major version (Server moved from decorator-based
+    # handler registration to constructor-based on_list_tools=/on_call_tool=,
+    # among other changes) that this codebase hasn't been migrated to yet -
+    # see the incident this pin fixed. Bump the upper bound only alongside a
+    # deliberate migration, not as a routine dependency update.
+    "mcp[cli]>=1.0.0,<2.0.0",
     "keyring>=25.0.0",
     "httpx>=0.27.0",
 ]
