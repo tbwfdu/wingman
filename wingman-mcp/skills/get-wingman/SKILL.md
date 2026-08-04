@@ -1,9 +1,9 @@
 ---
-name: docker-self-host
-description: Walk a user through self-hosting the wingman-mcp-server container end to end — checking whether Docker is available, installing Docker Engine (not Docker Desktop) if it isn't, optionally pointing to Rancher Desktop for a UI, pulling the image from GHCR, generating a docker-compose.yml and access key, and deploying locally. Use when the user asks to "install Wingman," "self-host Wingman," "set up the Wingman container," "run Wingman locally," "deploy Wingman with Docker," or wants to get the wingman-mcp-server Docker image running on their own machine instead of using the local stdio package or a hosted server.
+name: get-wingman
+description: Walk a user through self-hosting the wingman-mcp-server container end to end — checking whether Docker is available, installing Docker Engine (not Docker Desktop) if it isn't, optionally pointing to Rancher Desktop for a UI, pulling the image from GHCR, generating a docker-compose.yml and access key, and deploying locally. Use when the user asks to "get Wingman," "install Wingman," "self-host Wingman," "set up the Wingman container," "run Wingman locally," "deploy Wingman with Docker," or wants to get the wingman-mcp-server Docker image running on their own machine instead of using the local stdio package or a hosted server.
 ---
 
-# Docker Self-Host Walkthrough
+# Get Wingman
 
 This is an install walkthrough, not a one-shot script — react to what each command actually reports rather than assuming success, and confirm with the user before anything that installs system packages or starts long-running services with an open port.
 
