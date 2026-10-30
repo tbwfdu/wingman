@@ -297,56 +297,27 @@ What changed in the latest container image. Earlier versions are on the [Release
 <!-- release-notes:start -->
 **latest-20261030-6ecef64**
 
-- Add a release_only input to publish release notes without rebuilding the image
-- Run the release job for latest too, naming it by date and commit
-- Publish release notes and OCI annotations when pushing a versioned image
-- Revoke the admin session on logout, with the list kept in the admin store
-- Add a real-login sign-in test and require it before saving MCP group rules
-- Control admin sign-in and MCP access (full or read-only) by group
-- Show the provider's reason for a refused admin login; add an any-user option
-- Rework the OIDC admin tab: edit mode, collapsible steps, real Test, provider summary
-- Ignore tok.json token files saved during manual OIDC testing
-- Match admin users on any identity claim and prefer the email
-- Clear a stale admin volume when build-local.sh generates new keys
-- Keep the admin config and keys across build-local.sh runs
-- Sign in to the admin console with OIDC
-- Reserve scrollbar space so the admin page does not shift between tabs
-- Style the OIDC status line as a callout and stop mid-word wrapping
-- Fix stray vertical scrollbar on the admin tab bar
-- Keep the stores volume across build-local.sh runs
-- Reorganise the admin page into tabs and clean up the OIDC form
-- Configure OIDC sign-in from the admin UI, stored encrypted
-- Add an OIDC callback relay for providers with one fixed redirect URI
-- Align env-selection tests and docs with the on-by-default behaviour
-- Fix read-only and OAuth shim requests failing with 500
-- Stop tracking the generated local test keys file
-- Add optional generic OIDC sign-in (Workspace ONE Access, Keycloak)
-- Add per-user API keys to the self-host container
-- Persist the admin store across self-host container restarts
-- Let deploy.sh override the container image and warn on floating tags
-- Make deploy.sh create the Key Vault secrets the Bicep expects
-- Fix image scan findings: dockerignore, setuptools, apt upgrade
-- Bump GitHub Actions and add a scheduled dependency audit
-- Fix the Azure bundled image build for the two-package layout
-- Pin container build dependencies for reproducible images
-- Bump bridge's wingman-mcp pin to v0.5.7
-- fix(deploy): persist the admin environment store and describe the real deployment
-- Keep SHA256 values on a single scrollable line in the status modal
-- Admin UI polish: selective import, typography fixes, wording
-- Harden publish-changelog.sh's asset upload against transient clobber failures
-- Serve the RAG stores changelog as a standalone asset, decoupled from the tarball
-- Summarize the admin UI changelog by topic instead of raw item lists
-- Add export/import for the admin environments.enc store
-- Fix admin UI JS syntax error breaking the entire login page
-- Split self-host image build into native per-arch runners
-- Bump wingman-mcp dependency pin to v0.5.7
-- Add scripts to package and publish per-product store zips
-- Record an ingest changelog and surface it in the admin UI
-- Show full local SHA256 and replace admin store dialogs with in-app modals
-- Add --max-stale-fraction override for the stale-page cleanup cap
-- Fix stale-page cleanup deleting 81% of the uem store on a degraded crawl
-- Cache the Omnissa sitemap crawl to fix a 17x redundant-crawl stall
-- Split RAG store publish into a separate manual-only workflow
+## What's new
+
+- **Sign in to the admin console with your identity provider (OIDC).** Works with Workspace ONE Access and other OIDC providers such as Keycloak. Settings are configured in the admin UI and stored encrypted. An optional callback relay supports providers that allow only one fixed redirect URI.
+- **Access by group.** Choose which groups can open the admin console, and which groups get full or read-only MCP access. Saving MCP group rules requires a successful real-login "Test sign-in" first, to avoid locking yourself out.
+- **Per-user API keys** for the self-host container.
+- **Admin logout now ends the session on the server**, not just in the browser.
+- **The admin store is kept across container restarts** when a volume is mounted.
+
+## Improvements
+
+- The admin page is reorganised into tabs, with a cleaner OIDC form and clearer sign-in status messages.
+- The admin login page shows the provider's reason when a sign-in is refused.
+- Admin users can be matched on any identity claim, with the email preferred.
+- Admin UI polish: export and import of the environment store, selective import, and in-app dialogs.
+
+## Fixes
+
+- Fixed read-only and OAuth shim requests failing with a 500 error.
+- Fixed a JavaScript error that broke the admin login page.
+- Fixed a page-shift and stray-scrollbar issue on the admin page.
+- Image security scan findings addressed.
 <!-- release-notes:end -->
 
 ## License
