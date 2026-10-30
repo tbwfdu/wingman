@@ -290,6 +290,14 @@ docker rm -f wingman && docker run -d --name wingman -p 8000:8000 \
   ghcr.io/tbwfdu/wingman:latest
 ```
 
+## Release notes
+
+What changed in the latest container image. Earlier versions are on the [Releases page](https://github.com/tbwfdu/wingman/releases).
+
+<!-- release-notes:start -->
+_No release notes published yet._
+<!-- release-notes:end -->
+
 ## License
 
 See [LICENSE](LICENSE) for details.
