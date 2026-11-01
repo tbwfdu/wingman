@@ -321,29 +321,15 @@ docker rm -f wingman && docker run -d --name wingman -p 8000:8000 \
 What changed in the latest container image. Earlier versions are on the [Releases page](https://github.com/tbwfdu/wingman/releases).
 
 <!-- release-notes:start -->
-**latest-20261030-6ecef64**
+**latest-20261101-d79e53b**
 
-## What's new
-
-- **Sign in to the admin console with your identity provider (OIDC).** Works with Workspace ONE Access and other OIDC providers such as Keycloak. Settings are configured in the admin UI and stored encrypted. An optional callback relay supports providers that allow only one fixed redirect URI.
-- **Access by group.** Choose which groups can open the admin console, and which groups get full or read-only MCP access. Saving MCP group rules requires a successful real-login "Test sign-in" first, to avoid locking yourself out.
-- **Per-user API keys** for the self-host container.
-- **Admin logout now ends the session on the server**, not just in the browser.
-- **The admin store is kept across container restarts** when a volume is mounted.
-
-## Improvements
-
-- The admin page is reorganised into tabs, with a cleaner OIDC form and clearer sign-in status messages.
-- The admin login page shows the provider's reason when a sign-in is refused.
-- Admin users can be matched on any identity claim, with the email preferred.
-- Admin UI polish: export and import of the environment store, selective import, and in-app dialogs.
-
-## Fixes
-
-- Fixed read-only and OAuth shim requests failing with a 500 error.
-- Fixed a JavaScript error that broke the admin login page.
-- Fixed a page-shift and stray-scrollbar issue on the admin page.
-- Image security scan findings addressed.
+- Add OIDC setup wizard with provider chooser and field help; document Workspace ONE Access setup
+- Polish the Knowledge Stores Status dialog
+- Publish changelog.json alongside the stores archive
+- Disable the environments Export button when there is nothing to export
+- Widen the stores status dialog so the full SHA256 fits
+- Show change dates in the Knowledge Stores Status dialog
+- Ingest the new docs.omnissa.com /<bundle>/<page> URLs
 <!-- release-notes:end -->
 
 ## License
