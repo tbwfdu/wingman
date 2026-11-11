@@ -80,6 +80,9 @@ and the download happens only once.
   request headers, scoped to the request and never stored.
 - **Shared environments (admin API):** an admin configures product
   environments once (encrypted at rest) and every user shares them.
+- **Custom knowledge stores:** turn your own content (a wiki, runbooks, a folder
+  of PDFs) into a searchable store, upload it in the admin UI, and assistants get
+  a search tool for it. See [Custom knowledge stores](#custom-knowledge-stores).
 
 ### First run
 
@@ -142,6 +145,8 @@ docker run -d --name wingman -p 8000:8000 \
 | `WINGMAN_MCP_EXTRA_MUTATING_TOOLS` | No | Comma-separated tool names to additionally treat as mutating (forward-compat for tools added after this image was built). |
 | `WINGMAN_MCP_PUBLIC_URL` | No | Canonical URL advertised in discovery docs when behind a proxy / custom domain. |
 | `WINGMAN_MCP_DATA_DIR` | No | Where the RAG stores live. Defaults to `/data/stores` in the image; mount a volume here to cache them across restarts. |
+| `WINGMAN_MCP_CUSTOM_STORES_DIR` | No | Where uploaded custom knowledge stores are kept. Defaults to `custom-stores/` inside the stores volume. |
+| `WINGMAN_MCP_CUSTOM_STORE_MAX_UPLOAD_MB` | No | Largest archive the admin UI accepts. Default 1024. |
 
 \* At least one of `WINGMAN_MCP_ACCESS_KEY` or `WINGMAN_MCP_READONLY_ACCESS_KEY`
 must be set, or the server refuses to start.
@@ -214,7 +219,7 @@ Supported products: Workspace ONE UEM, App Volumes, Horizon (Connection Server),
 
 <img src="assets/product-select.png" width="600">
 
-From the main table you can edit credentials, switch the default, or delete environments. The **Knowledge stores** card at the bottom shows the local SHA256 of the downloaded stores and lets you check for updates or re-download.
+From the main table you can edit credentials, switch the default, or delete environments. The **Knowledge stores** tab shows the local SHA256 of the downloaded stores and lets you check for updates or re-download. It is also where you upload your own stores; see [Custom knowledge stores](#custom-knowledge-stores).
 
 #### Via the REST API
 
@@ -306,6 +311,112 @@ curl -s -o /dev/null -w '%{http_code}\n' -X DELETE \
 ```
 
 **How users consume them:** for any product a user does not send headers for, the server injects the admin store's default environment. Users can target a non-default environment with the `X-Wingman-Environment: <name>` header. Their own credential headers always take precedence.
+
+### Custom knowledge stores
+
+Add your own content as extra knowledge stores: a team wiki, product runbooks, a folder of PDFs. Each store appears to assistants as its own search tool, `search_kb_<name>`, alongside the built-in documentation search.
+
+Two roles are involved, and one person can do both:
+
+- **The author** prepares the content and builds the store on their own machine. The result is a single zip file.
+- **The admin** (whoever holds the admin key) uploads the zip in the admin UI.
+
+You need a Wingman image that includes custom stores. If your admin UI has a **Custom knowledge stores** card on the **Knowledge stores** tab, it does.
+
+#### 1. Prepare the content
+
+Put everything in one folder. Sub-folders are read.
+
+| Content | Files read | Notes |
+|---|---|---|
+| Markdown | `.md`, `.markdown` | Best results. Split by headings, so each section is found on its own. |
+| Text | `.txt`, `.rst` | One document per file. |
+| HTML | `.html`, `.htm` | Converted to Markdown first. Scripts, menus and images are dropped. |
+| PDF | `.pdf` | Text only. A scanned PDF with no text layer yields nothing, so run OCR first. |
+| Confluence Cloud | Page or folder URLs | Read with your own API token. See below. |
+
+Word, PowerPoint and Excel files are not read. Save them as PDF or Markdown first. Hidden files and images are skipped, and the next step tells you exactly what it read and what it ignored.
+
+Before you build, check the content:
+
+- **Everyone who can use the server can read everything in the store.** Permissions from the source (for example Confluence page permissions) do not carry over. Only include content that suits that whole audience.
+- **Remove drafts and anything pending.** Pages marked "draft", "items for review" or "pending correction" will be searched and quoted like the rest.
+- **Keep secrets out.** The build and the upload both refuse a store whose text contains keys, tokens or card numbers.
+- **Give each page a clear title and headings.** Results are labelled with the page title and heading path, and that is what lets an assistant tell similar sections apart.
+- **Keep internal content out of source control.** The built store is a copy of your content.
+
+For Confluence, create a standard API token (a scoped token may be rejected) and have your Atlassian email and the token ready. Prefer listing the specific pages you want over pointing at a whole space, so work in progress is not swept in later.
+
+#### 2. Create the store
+
+The authoring tool is the `wingman` command inside the container image. Run it once, interactively, on any machine with Docker. This mounts your content folder (read-only) and an output folder, and skips the server's first-boot download:
+
+```bash
+docker run --rm -it --entrypoint wingman \
+  -v "$PWD/my-docs:/input:ro" -v "$PWD/my-stores:/out" \
+  ghcr.io/tbwfdu/wingman:latest \
+  stores create --source-dir /input --work-dir /out
+```
+
+It asks a few questions. Press Enter to accept the answer in brackets.
+
+1. **Content source.** A folder of files, or Confluence URLs.
+2. **Name and short name.** The short name becomes the tool name (`search_kb_<short-name>`).
+3. **What it covers.** One or two sentences. Assistants read this to decide when to search the store, so be specific.
+4. **Owner, and who may see it.** The owner is the person to ask about wrong or stale content. Choose `internal` unless the content is approved for public sharing.
+5. **Up to three example questions** (optional). It prints the best match for each, so you can see the store answers something.
+6. **Where to save the zip.**
+
+It then shows a summary, builds the store (the language model it needs is already in the image), checks it, and writes `<short-name>.zip` into your output folder.
+
+For Confluence, replace the folder option with page URLs, and pass your credentials through from your shell so they are not typed on the command line (or leave them out and it will ask, hiding the token):
+
+```bash
+docker run --rm -it --entrypoint wingman \
+  -e CONFLUENCE_EMAIL -e CONFLUENCE_API_TOKEN \
+  -v "$PWD/my-stores:/out" \
+  ghcr.io/tbwfdu/wingman:latest \
+  stores create --confluence https://example.atlassian.net/wiki/spaces/ENG/pages/123456/Runbook --work-dir /out
+```
+
+Add `--with-children` to include the pages beneath each one you list. Credentials are used for that run only and are never written to the store or the zip.
+
+Every question also has a flag, so the command can run without prompts, for a script:
+
+```bash
+docker run --rm --entrypoint wingman \
+  -v "$PWD/my-docs:/input:ro" -v "$PWD/my-stores:/out" \
+  ghcr.io/tbwfdu/wingman:latest \
+  stores create --source-dir /input --work-dir /out --name "Acme Widgets" \
+  --description "Setup and resets for Acme widgets." --owner you@example.com \
+  --classification internal --question "how do I reset a widget" --yes
+```
+
+To change the content later, run the same command again with the same short name. It asks before replacing the old build and raises the version number, so the admin can see which copy is newer.
+
+#### 3. Upload it in the admin UI
+
+1. Open `http://<host>:8000/admin/ui` and sign in with the admin key.
+2. Go to the **Knowledge stores** tab.
+3. On the **Custom knowledge stores** card, choose **Import stores** and pick the zip.
+
+The upload is checked before anything is installed. If any store in the zip fails, nothing is imported and a dialog lists each problem. If a store with the same short name is already there, you are asked before it is replaced (the dialog shows the old and new versions, and replacing cannot be undone). When it succeeds, the store appears as a row showing its name, short name, version, who may see it, size, import date and owner, with a **Remove** button.
+
+Stores are kept in `custom-stores/` inside the stores volume, so they survive restarts and container replacement. If the card warns that the folder is not on a mounted volume, mount one at `/data/stores` as in [First run](#first-run), or imported stores are lost when the container is replaced. Archives up to 1024 MB are accepted by default (see `WINGMAN_MCP_CUSTOM_STORE_MAX_UPLOAD_MB`).
+
+Only import zips from someone you trust. Importing loads the store's database into the server, and its text is later shown to assistants as reference material.
+
+#### 4. Use it
+
+Nothing to restart. The tool list is read when a client asks for it, so reconnect your MCP client (or start a new session) and the new `search_kb_<short-name>` tool appears. Then ask a question the store covers. Assistants pick the tool from the description you wrote, so a specific description and good example questions decide whether the right store is chosen.
+
+Things to know:
+
+- **Labels are guidance, not access control.** A store marked `internal` makes results carry an `[INTERNAL]` tag, and the server asks assistants to open answers with **INTERNAL ONLY** and name the source. Assistants can ignore that, and it does not stop anyone with a key from searching the store.
+- **Read-only keys can search custom stores.** The tools only read.
+- **Search always returns its closest matches,** even for a question the store cannot answer. Check the sources quoted in the answer.
+- **Keep the number of stores modest.** Each one adds a tool to every client's list. A handful is fine; dozens make it hard for an assistant to choose.
+- **Rebuild when the content changes.** A store is a snapshot of the moment it was built. For Confluence content, rebuild on a schedule.
 
 ### Updating
 
