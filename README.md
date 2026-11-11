@@ -452,15 +452,17 @@ docker rm -f wingman && docker run -d --name wingman -p 8000:8000 \
 What changed in the latest container image. Earlier versions are on the [Releases page](https://github.com/tbwfdu/wingman/releases).
 
 <!-- release-notes:start -->
-**latest-20261101-d79e53b**
+**latest-20261111-5181726**
 
-- Add OIDC setup wizard with provider chooser and field help; document Workspace ONE Access setup
-- Polish the Knowledge Stores Status dialog
-- Publish changelog.json alongside the stores archive
-- Disable the environments Export button when there is nothing to export
-- Widen the stores status dialog so the full SHA256 fits
-- Show change dates in the Knowledge Stores Status dialog
-- Ingest the new docs.omnissa.com /<bundle>/<page> URLs
+- Tidy the custom stores card in the admin UI
+- Add wingman stores create, a guided build-and-pack command
+- Tag marked excerpts and send server instructions for internal stores
+- Word the handling notice as a fact, not an instruction
+- Add a handling notice to custom store search results
+- Expose each imported custom store as its own MCP search tool
+- Add admin UI import for custom knowledge stores
+- Add annotations and keep headings inside panels
+- Add custom knowledge store authoring kit
 <!-- release-notes:end -->
 
 ## License
