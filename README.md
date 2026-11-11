@@ -1,3 +1,23 @@
+## 12th Nov 2026
+### What's new
+- **Custom knowledge stores.** Turn your own content (a wiki, runbooks, a folder of PDFs, or Confluence pages) into a store and upload it in the admin UI. An admin imports a zip from the **Knowledge stores** tab. Stores are kept on the stores volume and survive restarts and container replacement.
+- **One search tool per store.** Each imported store appears to assistants as `search_kb_<name>`, with a description built from what you wrote about it. No restart is needed; reconnect your client to see new stores. Read-only keys can use them.
+- **Guided store creation.** `wingman stores create` asks a few questions, builds the store, checks it, and writes the zip to a folder of your choice.
+- **Internal and sensitive labels.** Results from an internal store carry an `[INTERNAL]` tag, and the server asks assistants to open their answers with the label and name the source. This is guidance, not access control.
+
+### Improvements
+
+- The custom stores card in the admin UI is easier to read: words no longer wrap mid-word, the Import and Remove buttons line up, and each store shows its size, import date and owner.
+- Every store in an upload is checked before anything is installed. If any fails, nothing is imported and the dialog lists each problem.
+- The build and the upload both refuse content that contains keys, tokens or card numbers.
+- Replacing a store asks first and shows the old and new versions.
+
+### Fixes
+
+- A stores volume that holds only custom stores no longer stops the built-in documentation stores from downloading on first start.
+
+---------
+
 ## 30th Oct 2026
 ### What's new
 - **Sign in to the admin console with your identity provider (OIDC).** Works with Workspace ONE Access and other OIDC providers such as Keycloak. Settings are configured in the admin UI and stored encrypted. An optional callback relay supports providers that allow only one fixed redirect URI.
