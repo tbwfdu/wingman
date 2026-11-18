@@ -452,17 +452,18 @@ docker rm -f wingman && docker run -d --name wingman -p 8000:8000 \
 What changed in the latest container image. Earlier versions are on the [Releases page](https://github.com/tbwfdu/wingman/releases).
 
 <!-- release-notes:start -->
-**latest-20261111-5181726**
+**latest-20261118-995782b**
 
-- Tidy the custom stores card in the admin UI
-- Add wingman stores create, a guided build-and-pack command
-- Tag marked excerpts and send server instructions for internal stores
-- Word the handling notice as a fact, not an instruction
-- Add a handling notice to custom store search results
-- Expose each imported custom store as its own MCP search tool
-- Add admin UI import for custom knowledge stores
-- Add annotations and keep headings inside panels
-- Add custom knowledge store authoring kit
+- Keep the admin console's stores page in the container build context
+- Replace the left-bar quote boxes with Prism patterns
+- Drop the summary tiles from the Environments page
+- Lay out every admin page the Prism way
+- Lay out the Sign-in (OIDC) page the Prism way
+- Style the admin console with blueprint-engine's Prism design system
+- Replace the admin page with a React admin console
+- Show internal custom stores with an amber badge, not green
+- feat(admin): add a Tools tab listing MCP tools by product
+- Support documentation sites in custom knowledge stores
 <!-- release-notes:end -->
 
 ## License
