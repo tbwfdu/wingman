@@ -452,11 +452,10 @@ docker rm -f wingman && docker run -d --name wingman -p 8000:8000 \
 What changed in the latest container image. Earlier versions are on the [Releases page](https://github.com/tbwfdu/wingman/releases).
 
 <!-- release-notes:start -->
-**latest-20261126-1ddec1b**
+**latest-20261126-1939e3e**
 
-- Fix the admin console export test failing in CI
-- Request the groups scope for Workspace ONE Access and document the OIDC setup
-- Limit environments by OIDC group and API key, and show who is signed in
+- Give the Azure deployment a separate config share
+- Don't request the bare required scope when its qualified form is listed
 <!-- release-notes:end -->
 
 ## License
