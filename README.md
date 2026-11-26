@@ -452,18 +452,11 @@ docker rm -f wingman && docker run -d --name wingman -p 8000:8000 \
 What changed in the latest container image. Earlier versions are on the [Releases page](https://github.com/tbwfdu/wingman/releases).
 
 <!-- release-notes:start -->
-**latest-20261118-995782b**
+**latest-20261126-1ddec1b**
 
-- Keep the admin console's stores page in the container build context
-- Replace the left-bar quote boxes with Prism patterns
-- Drop the summary tiles from the Environments page
-- Lay out every admin page the Prism way
-- Lay out the Sign-in (OIDC) page the Prism way
-- Style the admin console with blueprint-engine's Prism design system
-- Replace the admin page with a React admin console
-- Show internal custom stores with an amber badge, not green
-- feat(admin): add a Tools tab listing MCP tools by product
-- Support documentation sites in custom knowledge stores
+- Fix the admin console export test failing in CI
+- Request the groups scope for Workspace ONE Access and document the OIDC setup
+- Limit environments by OIDC group and API key, and show who is signed in
 <!-- release-notes:end -->
 
 ## License
