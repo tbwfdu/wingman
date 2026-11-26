@@ -452,10 +452,10 @@ docker rm -f wingman && docker run -d --name wingman -p 8000:8000 \
 What changed in the latest container image. Earlier versions are on the [Releases page](https://github.com/tbwfdu/wingman/releases).
 
 <!-- release-notes:start -->
-**latest-20261126-1939e3e**
+**latest-20261126-909a4e8**
 
-- Give the Azure deployment a separate config share
-- Don't request the bare required scope when its qualified form is listed
+- Mount the Azure Files volumes with nobrl
+- Import custom stores on local disk and check them in a child process
 <!-- release-notes:end -->
 
 ## License
